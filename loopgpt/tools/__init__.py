@@ -10,6 +10,7 @@ from loopgpt.tools.browser import Browser
 from loopgpt.tools.code import ExecutePythonFile, ReviewCode, ImproveCode, WriteTests
 from loopgpt.tools.math import EvaluateMath
 from loopgpt.tools.google_search import GoogleSearch
+from loopgpt.tools.bocha_search import BochaWebSearchTool
 from loopgpt.tools.filesystem import (
     ReadFromFile,
     WriteToFile,
@@ -61,4 +62,5 @@ def builtin_tools():
         EvaluateMath,
         AskUser,
         Shell,
+        BochaWebSearchTool,
     ]
