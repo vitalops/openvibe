@@ -315,6 +315,12 @@ class Session:
     def abort(self, timeout: float = 5.0) -> None:
         """Signal the worker to stop and wait up to *timeout* seconds."""
         self._abort_ev.set()
+        # If the worker is blocked waiting for a permission reply, unblock it
+        # with a sentinel so the run_in_executor thread can exit.
+        try:
+            self._resume_q.put_nowait(("__abort__", "deny"))
+        except queue.Full:
+            pass
         if self._worker and self._worker.is_alive():
             self._worker.join(timeout=timeout)
         with self._lock:

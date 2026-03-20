@@ -51,6 +51,14 @@ class OpenvibeApp(App[None]):
         await self.push_screen(WelcomeScreen())
 
     async def on_unmount(self) -> None:
+        # Abort any in-flight sessions so their worker threads (and the
+        # run_in_executor threads they spawned) can exit cleanly before the
+        # ThreadPoolExecutor atexit handler tries to join them.
+        for session in self._session_cache.values():
+            try:
+                session.abort(timeout=0)
+            except Exception:  # noqa: BLE001
+                pass
         if self.ov is not None:
             await self.ov.close_async()
 
