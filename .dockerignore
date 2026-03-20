@@ -1,6 +1,0 @@
-# exclude
-.*
-Dockerfile
-
-# include
-!.env

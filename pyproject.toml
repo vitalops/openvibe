@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "openvibe"
+version = "0.1.0"
+description = "Open-source AI coding agent — openvibe"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+keywords = ["ai", "coding", "agent", "llm", "cli"]
+
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.5.0",
+    "litellm>=1.52.0",
+    "mcp>=1.1.0",
+    "httpx>=0.27.0",
+    "aiofiles>=24.0.0",
+    "typer>=0.12.0",
+    "rich>=13.9.0",
+    "sse-starlette>=2.1.0",
+    "textual>=0.52.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.6.0",
+    "mypy>=1.11.0",
+]
+
+[project.scripts]
+openvibe = "openvibe.main:app"
+vibe = "openvibe.main:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["openvibe"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+ignore = ["N818"]  # exception names don't need to end in Error when used as signals
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
