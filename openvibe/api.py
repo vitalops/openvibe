@@ -90,6 +90,7 @@ class InputRequest:
     kind:        str          # "permission" | "question" | …
     description: str
     tool:        str | None   = None   # tool name for permission requests
+    argument:    str | None   = None   # raw value being acted on (command, path, …)
     options:     list[Option] = field(default_factory=list)
 
 
@@ -762,6 +763,7 @@ async def _run_turn_async(
                             kind="permission",
                             description=event.description or f"Allow '{event.tool}'?",
                             tool=event.tool,
+                            argument=event.argument,
                             options=[
                                 Option("allow",        "Allow once"),
                                 Option("allow_always", "Always allow"),

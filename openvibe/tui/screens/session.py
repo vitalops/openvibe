@@ -47,6 +47,10 @@ class SessionScreen(Screen):
         self._perm_reply: _queue.Queue[tuple[str, str]] = _queue.Queue(maxsize=1)
         # Tracks the current assistant message ID for token routing.
         self._current_msg_id: str = ""
+        # When a permission is resolved we store the permission message ID here
+        # so that the completed tool widget is placed inside that message (below
+        # the "→ allowed/denied" line) instead of the assistant message above it.
+        self._perm_tool_target: str | None = None
         super().__init__(**kwargs)
 
     # ------------------------------------------------------------------
@@ -132,10 +136,17 @@ class SessionScreen(Screen):
         if msg_widget:
             tool = pending["tool"]
             description = pending["description"]
+            argument = pending.get("argument")
+            argument_line = ""
+            if argument and argument != description:
+                argument_line = f"\n[dim]  {argument}[/dim]"
             msg_widget.replace_text(
-                f"⚠  [bold]{tool}[/bold]: {description}\n"
+                f"⚠  [bold]{tool}[/bold]: {description}{argument_line}\n"
                 f"[dim]→[/dim] {label}"
             )
+
+        # Route the completed tool widget into this permission message.
+        self._perm_tool_target = pending["message_id"]
 
         # Re-freeze while the worker waits for the tool to complete.
         self.query_one(InputBar).freeze()
@@ -196,6 +207,7 @@ class SessionScreen(Screen):
                         req.tool or "tool",
                         req.description,
                         self._session_id,
+                        argument=req.argument,
                     ),
                 )
                 # Block this thread until the TUI user replies.
@@ -237,10 +249,25 @@ class SessionScreen(Screen):
         widget = msg_list.get_message(event.message_id)
         if not widget:
             return
+
         if event.part_index in widget._tools:
             widget.update_tool(event.part_index, event.state)
         else:
-            await widget.add_tool(event.part_index, event.state)
+            # Don't create a widget for the initial "pending" state — the tool
+            # hasn't started (permission may not be granted).  Wait for the
+            # first meaningful state (running, completed, error).
+            if event.state.get("status") == "pending":
+                return
+            # If a permission was just resolved, place the tool widget inside
+            # the permission message (below the "→ allowed" line) so it
+            # appears after the prompt rather than above it.
+            target_widget = widget
+            if self._perm_tool_target:
+                perm_widget = msg_list.get_message(self._perm_tool_target)
+                if perm_widget:
+                    target_widget = perm_widget
+                self._perm_tool_target = None
+            await target_widget.add_tool(event.part_index, event.state)
             msg_list.scroll_end(animate=False)
 
     @on(events.TurnCompleted)
@@ -260,8 +287,12 @@ class SessionScreen(Screen):
         db = ov._db  # type: ignore[attr-defined]
 
         description = event.description or f"run {event.tool}"
+        # Show the actual argument (command/path) when it differs from the description.
+        argument_line = ""
+        if event.argument and event.argument != description:
+            argument_line = f"\n[dim]  {event.argument}[/dim]"
         msg_text = (
-            f"⚠  [bold]{event.tool}[/bold]: {description}\n"
+            f"⚠  [bold]{event.tool}[/bold]: {description}{argument_line}\n"
             f"[dim]1[/dim] allow  [dim]2[/dim] allow always  [dim]3[/dim] deny"
             f"   [dim](enter = 1)[/dim]"
         )
@@ -287,6 +318,7 @@ class SessionScreen(Screen):
             "request_id": event.request_id,
             "tool": event.tool,
             "description": description,
+            "argument": event.argument,
             "message_id": perm_msg.id,
         }
 

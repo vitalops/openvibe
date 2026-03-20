@@ -63,7 +63,27 @@ class ToolWidget(Widget):
         icon = _STATUS_ICON.get(status, "?")
         style = _STATUS_STYLE.get(status, "white")
         name = self._state.get("tool_name", "unknown")
-        return f"[{style}]{icon}[/{style}] [dim]{name}[/dim]"
+        argument = self._extract_argument()
+        arg_part = f" [dim]{_escape(argument)}[/dim]" if argument else ""
+        return f"[{style}]{icon}[/{style}] [dim]{name}[/dim]{arg_part}"
+
+    def _extract_argument(self) -> str:
+        """Return a short display string for the primary tool argument."""
+        inp: dict = self._state.get("input") or {}
+        if not inp:
+            return ""
+        # Prefer well-known single-argument keys in priority order.
+        for key in ("command", "path", "url", "query", "code", "input"):
+            if key in inp:
+                val = str(inp[key])
+                if len(val) > 200:
+                    val = val[:200] + "…"
+                return val
+        # Fall back to the first value.
+        val = str(next(iter(inp.values())))
+        if len(val) > 200:
+            val = val[:200] + "…"
+        return val
 
     def update_state(self, state: dict[str, Any]) -> None:
         self._state = state
@@ -102,6 +122,9 @@ class MessageWidget(Widget):
     MessageWidget Static {
         height: auto;
     }
+    MessageWidget Static.hidden-text {
+        display: none;
+    }
     MessageWidget.user {
         background: $surface;
         padding: 0 2;
@@ -126,7 +149,9 @@ class MessageWidget(Widget):
         super().__init__(classes=role, **kwargs)
 
     def compose(self) -> ComposeResult:
-        yield Static("", id=f"text-{self._message_id}")
+        # Start hidden — revealed on first text so tool-only assistant messages
+        # don't render a blank line before the tool widgets.
+        yield Static("", id=f"text-{self._message_id}", classes="hidden-text")
 
     def append_text(self, content: str) -> None:
         safe = _escape(content)
@@ -136,11 +161,15 @@ class MessageWidget(Widget):
             self._text = f"⚠  {safe}"
         else:
             self._text += safe
-        self.query_one(f"#text-{self._message_id}", Static).update(self._text)
+        widget = self.query_one(f"#text-{self._message_id}", Static)
+        widget.remove_class("hidden-text")
+        widget.update(self._text)
 
     def replace_text(self, content: str) -> None:
         self._text = content
-        self.query_one(f"#text-{self._message_id}", Static).update(self._text)
+        widget = self.query_one(f"#text-{self._message_id}", Static)
+        widget.remove_class("hidden-text")
+        widget.update(self._text)
 
     async def add_tool(self, index: int, state: dict[str, Any]) -> None:
         tool = ToolWidget(state, id=f"tool-{self._message_id}-{index}")

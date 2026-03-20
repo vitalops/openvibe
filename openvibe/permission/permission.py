@@ -61,6 +61,7 @@ class PermissionRequestedEvent(Event):
     request_id: str = ""
     tool: str = ""
     description: str = ""        # human-readable description of what the tool will do
+    argument: str | None = None  # the raw value being acted on (e.g. the command or path)
 
 
 @dataclass
@@ -158,6 +159,7 @@ class PermissionService:
                     case PermissionAction.ASK:
                         await self._ask(
                             tool=tool,
+                            argument=argument,
                             description=description,
                             session_id=session_id,
                             project_id=project_id,
@@ -165,12 +167,18 @@ class PermissionService:
                         return
 
         # No rule matched → ask by default
-        await self._ask(tool=tool, description=description, session_id=session_id)
+        await self._ask(
+            tool=tool,
+            argument=argument,
+            description=description,
+            session_id=session_id,
+        )
 
     async def _ask(
         self,
         tool: str,
         description: str,
+        argument: str | None = None,
         session_id: str | None = None,
         project_id: str | None = None,
     ) -> None:
@@ -186,6 +194,7 @@ class PermissionService:
                 request_id=request_id,
                 tool=tool,
                 description=description,
+                argument=argument,
             )
         )
 

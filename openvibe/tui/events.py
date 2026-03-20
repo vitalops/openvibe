@@ -86,11 +86,13 @@ class PermissionRequested(Message):
         tool: str,
         description: str,
         session_id: str,
+        argument: str | None = None,
     ) -> None:
         self.request_id = request_id
         self.tool = tool
         self.description = description
         self.session_id = session_id
+        self.argument = argument
         super().__init__()
 
 
