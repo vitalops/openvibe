@@ -89,6 +89,7 @@ class InputRequest:
     id:          str
     kind:        str          # "permission" | "question" | …
     description: str
+    tool:        str | None   = None   # tool name for permission requests
     options:     list[Option] = field(default_factory=list)
 
 
@@ -148,6 +149,9 @@ class Session:
         config: Any,         # openvibe.config.Config
         agent_name: str,
         llm: Any = None,     # sync callable(model, messages, **kw) → iterable[chunk]
+        processor: Any = None,   # openvibe.session.processor.SessionProcessor (async path)
+        bus: Any = None,         # openvibe.bus.EventBus (async path)
+        permissions: Any = None, # openvibe.permission.permission.PermissionService (async path)
     ) -> None:
         self._info       = session_info
         self._db         = db
@@ -155,8 +159,15 @@ class Session:
         self._config     = config
         self._agent_name = agent_name
         self._llm        = llm
+        self._processor  = processor
+        self._bus        = bus
+        self._permissions = permissions
         self._state      = SessionState.IDLE
         self._lock       = threading.Lock()
+
+        # Stored callbacks — set by send/send_nowait, reused by reply/reply_nowait
+        self._on_message: Callable[[str, str], None] | None = None
+        self._on_tool: Callable[[str, int, Any], None] | None = None
 
         # Worker ↔ caller communication channels
         # result_q: worker → caller (one Response per pause or completion)
@@ -194,6 +205,8 @@ class Session:
         self,
         text: str,
         on_token: Callable[[str], None] | None = None,
+        on_message: Callable[[str, str], None] | None = None,
+        on_tool: Callable[[str, int, Any], None] | None = None,
     ) -> Response:
         """Send *text* to the agent and block until a result is ready.
 
@@ -201,6 +214,9 @@ class Session:
         * the turn finishes           → Response(state=IDLE)
         * a permission request fires  → Response(state=WAITING)
         * an error occurs             → Response(state=ERROR)
+
+        *on_message(msg_id, role)* — called when a new message is created.
+        *on_tool(msg_id, part_index, state_dict)* — called on tool state changes.
         """
         with self._lock:
             if self._state != SessionState.IDLE:
@@ -210,6 +226,8 @@ class Session:
             self._state = SessionState.THINKING
             self._abort_ev.clear()
 
+        self._on_message = on_message
+        self._on_tool    = on_tool
         self._launch_worker(text, on_token, callback=None)
         return self._collect()
 
@@ -240,8 +258,10 @@ class Session:
     def send_nowait(
         self,
         text: str,
-        callback:  Callable[[Response], None] | None = None,
-        on_token:  Callable[[str], None]      | None = None,
+        callback:   Callable[[Response], None]         | None = None,
+        on_token:   Callable[[str], None]              | None = None,
+        on_message: Callable[[str, str], None]         | None = None,
+        on_tool:    Callable[[str, int, Any], None]    | None = None,
     ) -> None:
         """Send *text* and return immediately (state → THINKING).
 
@@ -256,6 +276,8 @@ class Session:
             self._state = SessionState.THINKING
             self._abort_ev.clear()
 
+        self._on_message = on_message
+        self._on_tool    = on_tool
         self._launch_worker(text, on_token, callback=callback)
 
     def reply_nowait(
@@ -309,17 +331,33 @@ class Session:
     ) -> None:
         from openvibe.agent.agent import resolve as _resolve
         agent = _resolve(self._config, self._agent_name)
-        self._worker = threading.Thread(
-            target=_run_turn,
-            args=(
-                text, on_token, callback,
-                self._info, agent, self._db, self._registry,
-                self._result_q, self._resume_q, self._abort_ev,
-                self._llm,
-            ),
-            daemon=True,
-            name=f"openvibe-worker-{self._info.id[:8]}",
-        )
+
+        if self._processor is not None:
+            # Async processor path — full-featured (bus events, real-time tools, etc.)
+            self._worker = threading.Thread(
+                target=_run_turn_async_threaded,
+                args=(
+                    text, on_token, self._on_message, self._on_tool, callback,
+                    self._info, agent, self._db,
+                    self._processor, self._bus, self._permissions,
+                    self._result_q, self._resume_q, self._abort_ev,
+                ),
+                daemon=True,
+                name=f"openvibe-worker-{self._info.id[:8]}",
+            )
+        else:
+            # Sync litellm path — used by tests and headless scripts
+            self._worker = threading.Thread(
+                target=_run_turn,
+                args=(
+                    text, on_token, callback,
+                    self._info, agent, self._db, self._registry,
+                    self._result_q, self._resume_q, self._abort_ev,
+                    self._llm,
+                ),
+                daemon=True,
+                name=f"openvibe-worker-{self._info.id[:8]}",
+            )
         self._worker.start()
 
     def _collect(self) -> Response:
@@ -374,6 +412,10 @@ class OpenVibe:
         self._registry: Any = None
         self._project: Any  = None
         self._mcp: Any      = None   # McpClientManager — kept alive to prevent GC
+        # Async-path components (populated by start_async())
+        self._bus: Any         = None
+        self._permissions: Any = None
+        self._processor: Any   = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -411,6 +453,64 @@ class OpenVibe:
     def __exit__(self, *_: Any) -> None:
         self.close()
 
+    async def start_async(self) -> "OpenVibe":
+        """Async startup — use this when running inside an async context (e.g. Textual TUI).
+
+        Initialises all components including the full async processor stack
+        (EventBus, SessionProcessor, PermissionService) so that sessions
+        created from this instance get real-time bus events.
+        """
+        from openvibe.bus import EventBus
+        from openvibe.config import load_config
+        from openvibe.db import create_database
+        from openvibe.llm import create_default_backend
+        from openvibe.mcp.client import McpClientManager
+        from openvibe.permission.permission import PermissionService
+        from openvibe.project import project as _project_module
+        from openvibe.session.processor import SessionProcessor
+        from openvibe.tool.base import create_default_registry
+
+        if self._config is None:
+            self._config = load_config(self._project_dir)
+        if self._db is None:
+            self._db = create_database()
+
+        llm = self._llm or create_default_backend()
+        self._bus         = EventBus()
+        self._registry    = create_default_registry()
+        self._permissions = PermissionService(self._db, self._bus)
+
+        mcp = McpClientManager()
+        if self._config.mcp:
+            mcp_tools = await mcp.connect_all(self._config.mcp)
+            for tool in mcp_tools:
+                self._registry.register(tool)
+        self._mcp = mcp
+
+        self._project   = _project_module.get_or_create(self._db, self._project_dir)
+        self._processor = SessionProcessor(
+            self._db, llm, self._bus, self._registry, self._permissions
+        )
+        self._llm = llm
+        return self
+
+    async def close_async(self) -> None:
+        """Async cleanup — closes MCP connections then the database."""
+        if self._mcp is not None:
+            await self._mcp.close_all()
+            self._mcp = None
+        if self._db is not None:
+            self._db.close()
+            self._db = None
+
+    # ------------------------------------------------------------------
+    # Properties
+    # ------------------------------------------------------------------
+
+    @property
+    def project_dir(self) -> Path:
+        return self._project_dir
+
     # ------------------------------------------------------------------
     # Session management
     # ------------------------------------------------------------------
@@ -433,7 +533,10 @@ class OpenVibe:
             directory=str(self._project_dir),
             title=title,
         )
-        return Session(info, self._db, self._registry, self._config, agent, self._llm)
+        return Session(
+            info, self._db, self._registry, self._config, agent, self._llm,
+            processor=self._processor, bus=self._bus, permissions=self._permissions,
+        )
 
     def get_session(self, session_id: str, agent: str = "build") -> Session:
         self._require_started()
@@ -441,7 +544,10 @@ class OpenVibe:
         info = _store.get(self._db, session_id)
         if info is None:
             raise KeyError(f"Session not found: {session_id!r}")
-        return Session(info, self._db, self._registry, self._config, agent, self._llm)
+        return Session(
+            info, self._db, self._registry, self._config, agent, self._llm,
+            processor=self._processor, bus=self._bus, permissions=self._permissions,
+        )
 
     def delete_session(self, session_id: str) -> None:
         self._require_started()
@@ -510,7 +616,219 @@ class OpenVibe:
 
 
 # ---------------------------------------------------------------------------
-# Worker — runs entirely in a background thread
+# Async worker — runs in a background thread via asyncio.run()
+# ---------------------------------------------------------------------------
+
+def _run_turn_async_threaded(
+    text: str,
+    on_token: Callable[[str], None] | None,
+    on_message: Callable[[str, str], None] | None,
+    on_tool: Callable[[str, int, Any], None] | None,
+    callback: Callable[["Response"], None] | None,
+    session_info: Any,
+    agent: Any,
+    db: Any,
+    processor: Any,
+    bus: Any,
+    permissions: Any,
+    result_q: "queue.Queue[Response]",
+    resume_q: "queue.Queue[tuple[str, str]]",
+    abort_ev: threading.Event,
+) -> None:
+    """Spawn a fresh event loop in this thread and run the async processor."""
+    import asyncio
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(
+            _run_turn_async(
+                text, on_token, on_message, on_tool, callback,
+                session_info, agent, db,
+                processor, bus, permissions,
+                result_q, resume_q, abort_ev,
+            )
+        )
+    finally:
+        loop.close()
+        asyncio.set_event_loop(None)
+
+
+async def _run_turn_async(
+    text: str,
+    on_token: Callable[[str], None] | None,
+    on_message: Callable[[str, str], None] | None,
+    on_tool: Callable[[str, int, Any], None] | None,
+    callback: Callable[["Response"], None] | None,
+    session_info: Any,
+    agent: Any,
+    db: Any,
+    processor: Any,
+    bus: Any,
+    permissions: Any,
+    result_q: "queue.Queue[Response]",
+    resume_q: "queue.Queue[tuple[str, str]]",
+    abort_ev: threading.Event,
+) -> None:
+    """Run one turn via the full async processor, translating bus events to callbacks.
+
+    Permission handling: when a PermissionRequestedEvent arrives, we pause by
+    putting Response(WAITING) in result_q and waiting (non-blocking) on
+    resume_q for the caller's reply, then forward it to PermissionService.
+    """
+    import asyncio as _asyncio
+
+    from openvibe.config import MessageRole, PermissionAction
+    from openvibe.permission.permission import PermissionRequestedEvent
+    from openvibe.session import session as _store
+    from openvibe.session.models import (
+        MessageCreatedEvent,
+        ReasoningDeltaEvent,
+        TextDeltaEvent,
+        TextPart,
+        ToolStateChangedEvent,
+        TurnCompletedEvent,
+    )
+
+    accumulated_text = ""
+
+    # Bridge the threading abort event to an asyncio.Event in this loop.
+    abort_async = _asyncio.Event()
+
+    async def _watch_abort() -> None:
+        loop = _asyncio.get_running_loop()
+        await loop.run_in_executor(None, abort_ev.wait)
+        abort_async.set()
+
+    abort_watcher = _asyncio.create_task(_watch_abort())
+
+    try:
+        # Create the user message before subscribing so no duplicate is made.
+        user_msg = _store.add_message(
+            db, session_info.id, MessageRole.USER, [TextPart(content=text)]
+        )
+        if on_message:
+            on_message(user_msg.id, "user")
+
+        subscribed = _asyncio.Event()
+
+        async def run_processor() -> None:
+            exc_to_raise = None
+            success = False
+            try:
+                await subscribed.wait()
+                await processor.run(
+                    session_info, agent, text, abort_async, user_message=user_msg
+                )
+                success = True
+            except Exception as exc:  # noqa: BLE001
+                exc_to_raise = exc
+            finally:
+                if not success:
+                    # Ensure consume_events() can exit even on error.
+                    await bus.publish(
+                        TurnCompletedEvent(session_id=session_info.id, message_id="")
+                    )
+            if exc_to_raise:
+                raise exc_to_raise
+
+        async def consume_events() -> None:
+            nonlocal accumulated_text
+            async with bus.subscribe() as bus_events:
+                subscribed.set()
+                async for event in bus_events:
+                    if getattr(event, "session_id", None) != session_info.id:
+                        continue
+
+                    if isinstance(event, MessageCreatedEvent) and event.message:
+                        msg = event.message
+                        if on_message and str(msg.role) == "assistant":
+                            on_message(msg.id, "assistant")
+
+                    elif isinstance(event, TextDeltaEvent):
+                        accumulated_text += event.content
+                        if on_token:
+                            on_token(event.content)
+
+                    elif isinstance(event, ReasoningDeltaEvent):
+                        pass  # reasoning tokens not surfaced in the public API
+
+                    elif isinstance(event, ToolStateChangedEvent):
+                        if on_tool:
+                            on_tool(event.message_id, event.part_index, event.state or {})
+
+                    elif isinstance(event, PermissionRequestedEvent):
+                        req = InputRequest(
+                            id=event.request_id,
+                            kind="permission",
+                            description=event.description or f"Allow '{event.tool}'?",
+                            tool=event.tool,
+                            options=[
+                                Option("allow",        "Allow once"),
+                                Option("allow_always", "Always allow"),
+                                Option("deny",         "Deny"),
+                            ],
+                        )
+                        messages = _store.list_messages(db, session_info.id)
+                        result_q.put(Response(
+                            state=SessionState.WAITING,
+                            text=accumulated_text,
+                            messages=messages,
+                            request=req,
+                        ))
+
+                        # Wait for the caller's reply without blocking this event loop.
+                        loop = _asyncio.get_running_loop()
+                        _req_id, option = await loop.run_in_executor(None, resume_q.get)
+
+                        # Resolve the permission Future inside this loop.
+                        decision = (
+                            PermissionAction.ALLOW
+                            if option in ("allow", "allow_always")
+                            else PermissionAction.DENY
+                        )
+                        remember = option == "allow_always"
+                        permissions.reply(
+                            request_id=_req_id,
+                            decision=decision,
+                            remember=remember,
+                            project_id=session_info.project_id,
+                            tool=event.tool,
+                        )
+
+                    elif isinstance(event, TurnCompletedEvent):
+                        break
+
+        await _asyncio.gather(run_processor(), consume_events())
+
+        final_messages = _store.list_messages(db, session_info.id)
+        response = Response(
+            state=SessionState.IDLE,
+            text=accumulated_text,
+            messages=final_messages,
+        )
+
+    except Exception as exc:  # noqa: BLE001
+        kind, msg_str = _classify_error(exc)
+        response = Response(
+            state=SessionState.ERROR,
+            text=accumulated_text,
+            error=ErrorInfo(kind=kind, message=msg_str),
+        )
+
+    finally:
+        abort_watcher.cancel()
+        try:
+            await abort_watcher
+        except _asyncio.CancelledError:
+            pass
+
+    result_q.put(response)
+    if callback:
+        callback(response)
+
+
+# ---------------------------------------------------------------------------
+# Sync worker — runs entirely in a background thread
 # ---------------------------------------------------------------------------
 
 def _run_turn(

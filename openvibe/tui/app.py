@@ -1,11 +1,8 @@
 """Textual application for openvibe.
 
-In the default (direct) mode the TUI constructs an ``AppState`` and talks to
-the core Python objects directly — no HTTP server, no port binding.
-
-A ``--url`` flag is available for connecting to a *remote* openvibe server
-instead; that path keeps ``OpenvibeClient`` and is the only case where the
-HTTP layer is used.
+The TUI uses the public ``OpenVibe`` API exclusively.  ``start_async()`` is
+called on mount so the full async stack (EventBus, SessionProcessor,
+PermissionService) is available to sessions created from this instance.
 """
 
 from __future__ import annotations
@@ -17,7 +14,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import Footer
 
-from openvibe.core import AppState, create_app_state
+from openvibe.api import OpenVibe
 
 
 _CSS = """
@@ -28,7 +25,7 @@ Screen {
 
 
 class OpenvibeApp(App[None]):
-    """TUI that operates directly on the core Python objects."""
+    """TUI that operates via the public OpenVibe API."""
 
     TITLE = "openvibe"
     CSS = _CSS
@@ -40,23 +37,29 @@ class OpenvibeApp(App[None]):
 
     def __init__(self, project_dir: Path | None = None) -> None:
         self._project_dir = project_dir or Path.cwd()
-        # Set after on_mount; screens access this via self.app.state
-        self.state: AppState | None = None
-        self._state_cm: Any = None
+        self.ov: OpenVibe | None = None
+        # Cache Session objects so state is preserved across screen pushes/pops.
+        self._session_cache: dict[str, Any] = {}
         super().__init__()
 
     def compose(self) -> ComposeResult:
         yield Footer()
 
     async def on_mount(self) -> None:
-        self._state_cm = create_app_state(project_dir=self._project_dir)
-        self.state = await self._state_cm.__aenter__()
+        self.ov = await OpenVibe(project_dir=self._project_dir).start_async()
         from openvibe.tui.screens.welcome import WelcomeScreen
         await self.push_screen(WelcomeScreen())
 
     async def on_unmount(self) -> None:
-        if self._state_cm is not None:
-            await self._state_cm.__aexit__(None, None, None)
+        if self.ov is not None:
+            await self.ov.close_async()
+
+    def get_session(self, session_id: str) -> Any:
+        """Return a cached Session object, loading it from the DB if needed."""
+        if session_id not in self._session_cache:
+            assert self.ov is not None
+            self._session_cache[session_id] = self.ov.get_session(session_id)
+        return self._session_cache[session_id]
 
     def action_sessions(self) -> None:
         from openvibe.tui.screens.sessions import SessionListScreen

@@ -9,9 +9,6 @@ from textual.screen import Screen
 from textual.widgets import Button, Label, ListItem, ListView, Static
 
 from openvibe import __version__
-from openvibe.project import project as project_module
-from openvibe.session import session as session_store
-from openvibe.session.models import SessionInfo
 
 
 _LOGO = r"""
@@ -32,11 +29,7 @@ _HELP = """\
 
 
 class WelcomeScreen(Screen[None]):
-    """Splash / home screen shown on first launch.
-
-    The user can start a new session, resume a recent one, or browse all
-    sessions.  Pressing Escape or Ctrl+Q quits.
-    """
+    """Splash / home screen shown on first launch."""
 
     DEFAULT_CSS = """
     WelcomeScreen {
@@ -108,7 +101,7 @@ class WelcomeScreen(Screen[None]):
     ]
 
     def __init__(self) -> None:
-        self._recent: list[SessionInfo] = []
+        self._recent: list = []
         super().__init__()
 
     def compose(self) -> ComposeResult:
@@ -128,10 +121,8 @@ class WelcomeScreen(Screen[None]):
                     yield Button("Quit", id="quit-btn", variant="error")
 
     def on_mount(self) -> None:
-        state = self.app.state  # type: ignore[attr-defined]
-        project = project_module.get_or_create(state.db, state.project_dir)
-        # Show up to 5 most-recent sessions
-        self._recent = session_store.list_sessions(state.db, project.id)[:5]
+        ov = self.app.ov  # type: ignore[attr-defined]
+        self._recent = ov.list_sessions()[:5]
         self._populate_recent()
 
     def _populate_recent(self) -> None:
@@ -179,13 +170,8 @@ class WelcomeScreen(Screen[None]):
     # ------------------------------------------------------------------
 
     def action_new_session(self) -> None:
-        state = self.app.state  # type: ignore[attr-defined]
-        project = project_module.get_or_create(state.db, state.project_dir)
-        session = session_store.create(
-            state.db,
-            project_id=project.id,
-            directory=str(state.project_dir),
-        )
+        ov = self.app.ov  # type: ignore[attr-defined]
+        session = ov.create_session()
         self._open_session(session.id)
 
     def action_all_sessions(self) -> None:

@@ -8,10 +8,6 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import Button, Input, Label, ListItem, ListView, Static
 
-from openvibe.project import project as project_module
-from openvibe.session import session as session_store
-from openvibe.session.models import SessionInfo
-
 
 class SessionListScreen(Screen[str | None]):
     """Full-screen session picker.
@@ -65,7 +61,7 @@ class SessionListScreen(Screen[str | None]):
     ]
 
     def __init__(self) -> None:
-        self._all_sessions: list[SessionInfo] = []
+        self._all_sessions: list = []
         super().__init__()
 
     def compose(self) -> ComposeResult:
@@ -79,12 +75,11 @@ class SessionListScreen(Screen[str | None]):
                 yield Button("Cancel", id="cancel", variant="default")
 
     def on_mount(self) -> None:
-        state = self.app.state  # type: ignore[attr-defined]
-        project = project_module.get_or_create(state.db, state.project_dir)
-        self._all_sessions = session_store.list_sessions(state.db, project.id)
+        ov = self.app.ov  # type: ignore[attr-defined]
+        self._all_sessions = ov.list_sessions()
         self._populate(self._all_sessions)
 
-    def _populate(self, sessions: list[SessionInfo]) -> None:
+    def _populate(self, sessions: list) -> None:
         lv = self.query_one("#session-list", ListView)
         lv.clear()
         empty = self.query_one("#empty", Static)
@@ -137,13 +132,8 @@ class SessionListScreen(Screen[str | None]):
     # ------------------------------------------------------------------
 
     def action_new_session(self) -> None:
-        state = self.app.state  # type: ignore[attr-defined]
-        project = project_module.get_or_create(state.db, state.project_dir)
-        session = session_store.create(
-            state.db,
-            project_id=project.id,
-            directory=str(state.project_dir),
-        )
+        ov = self.app.ov  # type: ignore[attr-defined]
+        session = ov.create_session()
         self.dismiss(session.id)
 
     def action_dismiss_none(self) -> None:
