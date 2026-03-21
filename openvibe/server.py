@@ -58,6 +58,7 @@ from openvibe.config import Config, PermissionAction, load_config
 from openvibe.core import AppState, create_app_state
 from openvibe.db import Database, create_database
 from openvibe.llm import LLMBackend, create_default_backend
+from openvibe.project import project as project_module
 from openvibe.provider import provider as provider_module
 from openvibe.session import session as session_store
 from openvibe.session.models import SessionInfo
