@@ -5,10 +5,24 @@ from __future__ import annotations
 from typing import Any
 
 from rich.markup import escape as _escape
+from rich.markdown import Markdown as _RichMarkdown
+from rich.syntax import Syntax as _Syntax
 from textual.app import ComposeResult
 from textual.containers import VerticalScroll
 from textual.widget import Widget
 from textual.widgets import Static
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _looks_like_diff(text: str) -> bool:
+    """Return True if the text looks like a unified diff."""
+    for line in text.splitlines()[:10]:
+        if line.startswith(("diff --git ", "--- ", "+++ ", "@@ ")):
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -97,13 +111,17 @@ class ToolWidget(Widget):
             self._refresh_output()
 
     def _refresh_output(self) -> None:
-        text = ""
-        if self._expanded:
-            content = self._state.get("output") or self._state.get("error") or ""
-            if len(content) > 2000:
-                content = content[:2000] + "\n… (truncated)"
-            text = f"[dim]{_escape(content)}[/dim]"
-        self.query_one("#output", Static).update(text)
+        out = self.query_one("#output", Static)
+        if not self._expanded:
+            out.update("")
+            return
+        content = self._state.get("output") or self._state.get("error") or ""
+        if len(content) > 2000:
+            content = content[:2000] + "\n… (truncated)"
+        if _looks_like_diff(content):
+            out.update(_Syntax(content, "diff", theme="monokai", word_wrap=True))
+        else:
+            out.update(f"[dim]{_escape(content)}[/dim]")
 
 
 # ---------------------------------------------------------------------------
@@ -154,22 +172,29 @@ class MessageWidget(Widget):
         yield Static("", id=f"text-{self._message_id}", classes="hidden-text")
 
     def append_text(self, content: str) -> None:
-        safe = _escape(content)
-        if not self._text and self._role == "user":
-            self._text = f"[dim]>[/dim] {safe}"
-        elif not self._text and self._role == "error":
-            self._text = f"⚠  {safe}"
-        else:
-            self._text += safe
         widget = self.query_one(f"#text-{self._message_id}", Static)
         widget.remove_class("hidden-text")
-        widget.update(self._text)
+        if self._role == "assistant":
+            self._text += content
+            widget.update(_RichMarkdown(self._text, code_theme="monokai"))
+        else:
+            safe = _escape(content)
+            if not self._text and self._role == "user":
+                self._text = f"[dim]>[/dim] {safe}"
+            elif not self._text and self._role == "error":
+                self._text = f"⚠  {safe}"
+            else:
+                self._text += safe
+            widget.update(self._text)
 
     def replace_text(self, content: str) -> None:
         self._text = content
         widget = self.query_one(f"#text-{self._message_id}", Static)
         widget.remove_class("hidden-text")
-        widget.update(self._text)
+        if self._role == "assistant":
+            widget.update(_RichMarkdown(self._text, code_theme="monokai"))
+        else:
+            widget.update(self._text)
 
     async def add_tool(self, index: int, state: dict[str, Any]) -> None:
         tool = ToolWidget(state, id=f"tool-{self._message_id}-{index}")

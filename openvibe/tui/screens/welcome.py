@@ -34,7 +34,7 @@ class WelcomeScreen(Screen[None]):
     DEFAULT_CSS = """
     WelcomeScreen {
         align: center middle;
-        background: $background;
+        background: #000000;
     }
     #panel {
         width: 64;

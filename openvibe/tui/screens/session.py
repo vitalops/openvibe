@@ -26,7 +26,7 @@ class SessionScreen(Screen):
     }
     #header {
         height: 1;
-        background: $background;
+        background: #000000;
         color: $text-muted;
         padding: 0 2;
     }

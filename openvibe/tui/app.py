@@ -20,7 +20,7 @@ from openvibe.api import OpenVibe
 
 _CSS = """
 Screen {
-    background: $background;
+    background: #000000;
 }
 """
 

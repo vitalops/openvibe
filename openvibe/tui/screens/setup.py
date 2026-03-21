@@ -42,7 +42,7 @@ class SetupWizardScreen(Screen[None]):
     DEFAULT_CSS = """
     SetupWizardScreen {
         align: center middle;
-        background: $background;
+        background: #000000;
     }
     #wizard {
         width: 66;
