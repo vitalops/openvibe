@@ -1,8 +1,8 @@
 """Markdown-to-Rich-markup renderer.
 
-Converts markdown text into a Rich ``Text`` renderable so that content can be
-rendered inside a plain ``Static`` widget — which, unlike Rich's ``Markdown``
-renderable, preserves terminal text selection.
+Converts markdown text into a list of segments (text or code) so that each
+can be rendered in its own ``Static`` widget.  Code blocks get a separate
+widget with a CSS background, preserving terminal text selection everywhere.
 
 Syntax highlighting for fenced code blocks is handled by Pygments (ships with
 Rich).
@@ -11,19 +11,15 @@ Rich).
 from __future__ import annotations
 
 import re
+from typing import Literal
 
 import mistune
 from pygments import highlight as _pygments_highlight
 from pygments.formatters import TerminalTrueColorFormatter
 from pygments.lexers import get_lexer_by_name, guess_lexer
 from pygments.util import ClassNotFound
-from rich.console import ConsoleOptions, Group, RenderableType, RenderResult
 from rich.markup import escape
-from rich.measure import Measurement
-from rich.style import Style
 from rich.text import Text
-
-_CODE_BG = Style(bgcolor="#282828")
 
 
 # ---------------------------------------------------------------------------
@@ -56,6 +52,8 @@ _CODE_RE = re.compile(re.escape(_CODE_START) + "(.*?)" + re.escape(_CODE_END), r
 
 _LI = "\x00LI\x00"
 _INDENT = "  "
+
+Segment = tuple[Literal["text", "code"], Text]
 
 
 class _RichRenderer(mistune.HTMLRenderer):
@@ -118,8 +116,6 @@ class _RichRenderer(mistune.HTMLRenderer):
     def block_code(self, code: str, info: str | None = None, **attrs: object) -> str:
         lang = info.split()[0] if info else None
         highlighted = _highlight_code(code.rstrip("\n"), lang)
-        # Use ANSI dim for the ``` bars so the entire block lives inside the
-        # sentinel and gets a uniform background applied in render_markdown.
         dim_on, dim_off = "\x1b[2m", "\x1b[22m"
         bar = f"{dim_on}```{lang or ''}{dim_off}"
         end_bar = f"{dim_on}```{dim_off}"
@@ -159,28 +155,6 @@ class _RichRenderer(mistune.HTMLRenderer):
 
 
 # ---------------------------------------------------------------------------
-# Code block renderable (pads background to full width)
-# ---------------------------------------------------------------------------
-
-
-class _CodeBlock:
-    """Renderable that draws syntax-highlighted code with a full-width background."""
-
-    def __init__(self, ansi_content: str) -> None:
-        self._text = Text.from_ansi(ansi_content)
-
-    def __rich_console__(self, console: object, options: ConsoleOptions) -> RenderResult:
-        width = options.max_width
-        for line in self._text.split():
-            line.set_length(width)
-            line.stylize(_CODE_BG)
-            yield line
-
-    def __rich_measure__(self, console: object, options: ConsoleOptions) -> Measurement:
-        return Measurement(1, options.max_width)
-
-
-# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -189,28 +163,25 @@ _md = mistune.create_markdown(renderer=_RichRenderer())
 _TRAILING_NL = re.compile(r"\n$")
 
 
-def render_markdown(text: str) -> RenderableType:
-    """Convert *text* (markdown) to a Rich renderable.
+def render_markdown(text: str) -> list[Segment]:
+    """Convert *text* (markdown) to a list of ``("text"|"code", Text)`` segments.
 
-    Rich markup sections are parsed via ``Text.from_markup``; code blocks
-    containing raw ANSI escapes become ``_CodeBlock`` renderables with a
-    full-width background.  Everything is combined into a ``Group``.
+    Each segment is meant to be rendered in its own ``Static`` widget so that
+    code blocks can receive a CSS background independently.
     """
     raw = _md(text)
     raw = _TRAILING_NL.sub("", raw)
 
-    parts: list[RenderableType] = []
+    segments: list[Segment] = []
     pos = 0
     for m in _CODE_RE.finditer(raw):
         before = raw[pos : m.start()]
         if before:
-            parts.append(Text.from_markup(before))
-        parts.append(_CodeBlock(m.group(1)))
+            segments.append(("text", Text.from_markup(before)))
+        segments.append(("code", Text.from_ansi(m.group(1))))
         pos = m.end()
     tail = raw[pos:]
     if tail:
-        parts.append(Text.from_markup(tail))
+        segments.append(("text", Text.from_markup(tail)))
 
-    if len(parts) == 1:
-        return parts[0]
-    return Group(*parts)
+    return segments

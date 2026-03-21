@@ -135,7 +135,7 @@ class InputBar(Widget):
         yield ChatInput(id="chat-input")
 
     def _hint_text(self) -> str:
-        return "[dim]enter[/dim] send  [dim]ctrl+j[/dim] newline  [dim]↑↓[/dim] history"
+        return "[dim]enter[/dim] send  [dim]ctrl+j[/dim] newline  [dim]↑↓[/dim] history  [dim]ctrl+q[/dim] exit"
 
     def focus_input(self) -> None:
         self.query_one(ChatInput).focus()

@@ -48,6 +48,8 @@ class SessionScreen(Screen):
         # so that the completed tool widget is placed inside that message (below
         # the "→ allowed/denied" line) instead of the assistant message above it.
         self._perm_tool_target: str | None = None
+        # Approximate output token counter (incremented per TextDelta event).
+        self._stream_token_count: int = 0
         super().__init__(**kwargs)
 
     # ------------------------------------------------------------------
@@ -165,9 +167,23 @@ class SessionScreen(Screen):
                         continue
                     await widget.add_tool(i, part.state.model_dump())
 
-    def _refresh_header(self, *, streaming: bool = False) -> None:
+    @staticmethod
+    def _fmt_tokens(n: int) -> str:
+        if n >= 999_950:
+            v = n / 1_000_000
+            return f"{v:.2f}".rstrip("0").rstrip(".") + "M"
+        if n >= 1_000:
+            v = n / 1_000
+            return f"{v:.1f}".rstrip("0").rstrip(".") + "k"
+        return str(n)
+
+    def _refresh_header(self, *, streaming: bool = False, token_count: int = 0) -> None:
         title = self._session_title or self._session_id[:12]
-        suffix = "  [dim]streaming…[/dim]" if streaming else ""
+        if streaming:
+            tok = f" ({self._fmt_tokens(token_count)} tokens)" if token_count else ""
+            suffix = f"  [dim]streaming…{tok}[/dim]"
+        else:
+            suffix = ""
         self.query_one("#header", Static).update(
             f"[bold]openvibe[/bold]  [dim]{title}[/dim]{suffix}"
         )
@@ -185,6 +201,7 @@ class SessionScreen(Screen):
         input_bar = self.query_one(InputBar)
         input_bar.record_submission(event.text)
         input_bar.freeze()
+        self._stream_token_count = 0
         self._refresh_header(streaming=True)
         self._start_turn(event.text)
 
@@ -370,6 +387,8 @@ class SessionScreen(Screen):
 
     @on(events.TextDelta)
     def handle_text_delta(self, event: events.TextDelta) -> None:
+        self._stream_token_count += 1
+        self._refresh_header(streaming=True, token_count=self._stream_token_count)
         self.query_one(MessageList).append_text(event.message_id, event.content)
 
     @on(events.ToolStateChanged)

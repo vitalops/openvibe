@@ -144,6 +144,9 @@ class MessageWidget(Widget):
     MessageWidget Static.hidden-text {
         display: none;
     }
+    MessageWidget Static.code-block {
+        background: #282828;
+    }
     MessageWidget.user {
         background: #3A3A3A;
         padding: 0 2;
@@ -165,6 +168,9 @@ class MessageWidget(Widget):
         self._role = role
         self._text = ""
         self._tools: dict[int, ToolWidget] = {}
+        # Tracks segment Static widgets for assistant markdown rendering.
+        self._segments: list[tuple[str, Static]] = []
+        self._seg_gen: int = 0
         super().__init__(classes=role, **kwargs)
 
     def compose(self) -> ComposeResult:
@@ -172,13 +178,52 @@ class MessageWidget(Widget):
         # don't render a blank line before the tool widgets.
         yield Static("", id=f"text-{self._message_id}", classes="hidden-text")
 
+    def _simple_widget(self) -> Static:
+        """Return the single Static used for non-assistant roles."""
+        return self.query_one(f"#text-{self._message_id}", Static)
+
+    def _update_segments(self) -> None:
+        """Re-render markdown into segment widgets, reusing where possible."""
+        segments = render_markdown(self._text)
+        old_kinds = [k for k, _ in self._segments]
+        new_kinds = [k for k, _ in segments]
+
+        if old_kinds == new_kinds:
+            # Structure unchanged — update content in place.
+            for (_, widget), (_, content) in zip(self._segments, segments):
+                widget.update(content)
+            return
+
+        # Structure changed — remove old segment widgets and mount new ones.
+        # Hide the compose-time placeholder first.
+        self._simple_widget().add_class("hidden-text")
+        for _, widget in self._segments:
+            widget.remove()
+        self._segments.clear()
+        self._seg_gen += 1
+
+        # Find the insertion point: before the first ToolWidget if any,
+        # otherwise append at the end.
+        tool_widgets = self.query(ToolWidget)
+        before = tool_widgets.first() if tool_widgets else None
+
+        for i, (kind, content) in enumerate(segments):
+            css_class = "code-block" if kind == "code" else ""
+            seg_id = f"seg-{self._message_id}-{self._seg_gen}-{i}"
+            widget = Static(content, id=seg_id, classes=css_class)
+            self._segments.append((kind, widget))
+            if before is not None:
+                self.mount(widget, before=before)
+            else:
+                self.mount(widget)
+
     def append_text(self, content: str) -> None:
-        widget = self.query_one(f"#text-{self._message_id}", Static)
-        widget.remove_class("hidden-text")
         if self._role == "assistant":
             self._text += content
-            widget.update(render_markdown(self._text))
+            self._update_segments()
         else:
+            widget = self._simple_widget()
+            widget.remove_class("hidden-text")
             safe = _escape(content)
             if not self._text and self._role == "user":
                 self._text = f"[dim]>[/dim] {safe}"
@@ -190,11 +235,11 @@ class MessageWidget(Widget):
 
     def replace_text(self, content: str) -> None:
         self._text = content
-        widget = self.query_one(f"#text-{self._message_id}", Static)
-        widget.remove_class("hidden-text")
         if self._role == "assistant":
-            widget.update(render_markdown(self._text))
+            self._update_segments()
         else:
+            widget = self._simple_widget()
+            widget.remove_class("hidden-text")
             widget.update(self._text)
 
     async def add_tool(self, index: int, state: dict[str, Any]) -> None:
