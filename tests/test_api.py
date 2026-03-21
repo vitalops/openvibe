@@ -338,23 +338,26 @@ def test_permission_allow_resumes_to_idle(tmp_path):
 
 
 def test_permission_deny_returns_idle(tmp_path):
-    """Denying permission still completes the turn."""
+    """Denying permission still completes the turn with the final LLM text."""
     llm = ScriptedMockLLM([("bash", {"command": "echo hi"}), "after deny"])
     with _ov(tmp_path, llm=llm) as ov:
         session = ov.create_session(agent="build")
         waiting = session.send("do it")
         assert waiting.state == SessionState.WAITING
-        assert session.reply(waiting.request.id, "deny").state == SessionState.IDLE
+        done = session.reply(waiting.request.id, "deny")
+        assert done.state == SessionState.IDLE
+        assert done.text == "after deny"
 
 
 def test_permission_request_has_options(tmp_path):
-    """InputRequest must expose allow/deny options."""
+    """InputRequest must expose allow, allow_always, and deny options."""
     llm = ScriptedMockLLM([("bash", {"command": "ls"}), "ok"])
     with _ov(tmp_path, llm=llm) as ov:
         resp = ov.create_session(agent="build").send("list files")
         assert resp.state == SessionState.WAITING
         option_values = {o.value for o in resp.request.options}
         assert "allow" in option_values
+        assert "allow_always" in option_values
         assert "deny" in option_values
 
 
@@ -471,22 +474,40 @@ def test_doom_loop_guard_fires(tmp_path):
 # Error classification (_classify_error)
 # ---------------------------------------------------------------------------
 
-def test_classify_auth_error(tmp_path):
+def test_classify_auth_error():
     from openvibe.api import _classify_error
     kind, _ = _classify_error(Exception("Invalid API key provided"))
     assert kind == "auth"
 
 
-def test_classify_context_overflow_error(tmp_path):
+def test_classify_unauthorized_error():
+    from openvibe.api import _classify_error
+    kind, _ = _classify_error(Exception("401 Unauthorized"))
+    assert kind == "auth"
+
+
+def test_classify_context_overflow_error():
     from openvibe.api import _classify_error
     kind, _ = _classify_error(Exception("context length exceeded limit"))
     assert kind == "context_overflow"
 
 
-def test_classify_generic_api_error(tmp_path):
+def test_classify_context_window_error():
+    from openvibe.api import _classify_error
+    kind, _ = _classify_error(Exception("context window too large"))
+    assert kind == "context_overflow"
+
+
+def test_classify_generic_api_error():
     from openvibe.api import _classify_error
     kind, _ = _classify_error(Exception("something went wrong"))
     assert kind == "api_error"
+
+
+def test_classify_error_returns_original_message():
+    from openvibe.api import _classify_error
+    _, msg = _classify_error(Exception("original message text"))
+    assert "original message text" in msg
 
 
 # ---------------------------------------------------------------------------
@@ -529,3 +550,372 @@ def test_get_session_can_continue_conversation(tmp_path):
         resp = s2.send("continue")
         assert resp.text == "continued"
         assert len(s2.messages()) >= 4  # user+asst × 2
+
+
+# ---------------------------------------------------------------------------
+# reply_nowait
+# ---------------------------------------------------------------------------
+
+def test_reply_nowait_in_idle_raises(tmp_path):
+    with _ov(tmp_path) as ov:
+        session = ov.create_session()
+        with pytest.raises(InvalidStateError, match="WAITING"):
+            session.reply_nowait("fake-id", "allow")
+
+
+def test_reply_nowait_delivers_response(tmp_path):
+    """reply_nowait() must deliver the final response via its callback."""
+    llm = ScriptedMockLLM([("bash", {"command": "echo hi"}), "done"])
+    with _ov(tmp_path, llm=llm) as ov:
+        session = ov.create_session(agent="build")
+        waiting = session.send("run it")
+        assert waiting.state == SessionState.WAITING
+
+        received: list[Response] = []
+        ev = threading.Event()
+
+        def handle(resp: Response) -> None:
+            received.append(resp)
+            ev.set()
+
+        session.reply_nowait(waiting.request.id, "allow", callback=handle)
+        ev.wait(timeout=5)
+        assert len(received) == 1
+        assert received[0].state == SessionState.IDLE
+
+
+def test_reply_nowait_without_callback_still_transitions(tmp_path):
+    """reply_nowait() without a callback must still let the worker finish."""
+    llm = ScriptedMockLLM([("bash", {"command": "echo hi"}), "done"])
+    with _ov(tmp_path, llm=llm) as ov:
+        session = ov.create_session(agent="build")
+        waiting = session.send("run it")
+        assert waiting.state == SessionState.WAITING
+
+        session.reply_nowait(waiting.request.id, "allow")
+        # No callback — poll until idle or timeout
+        deadline = time.monotonic() + 5.0
+        while session.state == SessionState.THINKING and time.monotonic() < deadline:
+            time.sleep(0.05)
+        # Drain result queue so the session stays consistent
+        if not session._result_q.empty():
+            r = session._result_q.get_nowait()
+            session._state = r.state
+        assert session.state == SessionState.IDLE
+
+
+# ---------------------------------------------------------------------------
+# on_message and on_tool callbacks
+# ---------------------------------------------------------------------------
+
+def test_send_on_message_accepted_without_error(tmp_path):
+    """on_message is stored but not called in the sync worker path — must not crash."""
+    llm = MockLLM({"hello": "world"})
+    with _ov(tmp_path, llm=llm) as ov:
+        session = ov.create_session()
+        events: list[tuple[str, str]] = []
+        resp = session.send("hello", on_message=lambda msg_id, role: events.append((msg_id, role)))
+        # Sync path does not fire on_message — just verify no exception and correct state.
+        assert resp.state == SessionState.IDLE
+        assert resp.text == "world"
+
+
+def test_send_on_tool_accepted_without_error(tmp_path):
+    """on_tool is stored but not called in the sync worker path — must not crash."""
+    llm = ScriptedMockLLM([("bash", {"command": "echo hi"}), "done"])
+    with _ov(tmp_path, llm=llm) as ov:
+        session = ov.create_session(agent="build")
+        tool_events: list[tuple] = []
+        resp = session.send(
+            "run it",
+            on_tool=lambda msg_id, idx, state: tool_events.append((msg_id, idx, state)),
+        )
+        assert resp.state in (SessionState.WAITING, SessionState.IDLE)
+
+
+# ---------------------------------------------------------------------------
+# ERROR state and recovery
+# ---------------------------------------------------------------------------
+
+def test_send_error_response_on_llm_exception(tmp_path):
+    def boom(model, messages, **kw):
+        raise RuntimeError("something went wrong")
+
+    with _ov(tmp_path, llm=boom) as ov:
+        resp = ov.create_session().send("anything")
+        assert resp.state == SessionState.ERROR
+        assert resp.error is not None
+        assert resp.error.kind == "api_error"
+
+
+def test_error_response_message_in_error_info(tmp_path):
+    def boom(model, messages, **kw):
+        raise RuntimeError("something went wrong")
+
+    with _ov(tmp_path, llm=boom) as ov:
+        resp = ov.create_session().send("anything")
+        assert "something went wrong" in resp.error.message
+
+
+def test_auth_error_classified_correctly(tmp_path):
+    def boom(model, messages, **kw):
+        raise RuntimeError("Invalid API key provided")
+
+    with _ov(tmp_path, llm=boom) as ov:
+        resp = ov.create_session().send("anything")
+        assert resp.state == SessionState.ERROR
+        assert resp.error.kind == "auth"
+
+
+# ---------------------------------------------------------------------------
+# delete_session archives (hides from listing, does not hard-delete)
+# ---------------------------------------------------------------------------
+
+def test_delete_session_archives_not_hard_deletes(tmp_path):
+    """delete_session() archives so the session is hidden from list_sessions()
+    but still retrievable by ID."""
+    with _ov(tmp_path) as ov:
+        session = ov.create_session()
+        sid = session.id
+        ov.delete_session(sid)
+
+        ids = [s.id for s in ov.list_sessions()]
+        assert sid not in ids
+
+        # Still retrievable
+        fetched = ov.get_session(sid)
+        assert fetched.id == sid
+
+
+# ---------------------------------------------------------------------------
+# _build_system_prompt
+# ---------------------------------------------------------------------------
+
+def test_build_system_prompt_with_base_only():
+    from openvibe.api import _build_system_prompt
+    from openvibe.agent.agent import AgentInfo
+
+    agent = AgentInfo(name="x", description="", system_prompt="base prompt")
+    assert _build_system_prompt(agent) == "base prompt"
+
+
+def test_build_system_prompt_with_extra_instructions():
+    from openvibe.api import _build_system_prompt
+    from openvibe.agent.agent import AgentInfo
+
+    agent = AgentInfo(
+        name="x",
+        description="",
+        system_prompt="base",
+        extra_instructions=["extra1", "extra2"],
+    )
+    result = _build_system_prompt(agent)
+    assert "base" in result
+    assert "extra1" in result
+    assert "extra2" in result
+
+
+def test_build_system_prompt_empty_agent():
+    from openvibe.api import _build_system_prompt
+    from openvibe.agent.agent import AgentInfo
+
+    agent = AgentInfo(name="x", description="", system_prompt="")
+    assert _build_system_prompt(agent) == ""
+
+
+# ---------------------------------------------------------------------------
+# _model_string
+# ---------------------------------------------------------------------------
+
+def test_model_string_default():
+    from openvibe.api import _model_string
+    from openvibe.agent.agent import AgentInfo
+
+    agent = AgentInfo(name="x", description="", system_prompt="")
+    assert _model_string(agent) == "anthropic/claude-sonnet-4-5"
+
+
+def test_model_string_with_model():
+    from openvibe.api import _model_string
+    from openvibe.agent.agent import AgentInfo
+    from openvibe.config import ModelRef
+
+    agent = AgentInfo(
+        name="x",
+        description="",
+        system_prompt="",
+        model=ModelRef(provider_id="openai", model_id="gpt-4o"),
+    )
+    assert _model_string(agent) == "openai/gpt-4o"
+
+
+# ---------------------------------------------------------------------------
+# _messages_to_litellm — tool call serialisation
+# ---------------------------------------------------------------------------
+
+def test_messages_to_litellm_with_tool_call(tmp_path):
+    """An assistant message with a ToolPart must produce tool_calls + tool result."""
+    from openvibe.api import _messages_to_litellm
+    from openvibe.config import MessageRole, ToolStateStatus
+    from openvibe.session.models import ToolPart, ToolState
+
+    llm = ScriptedMockLLM([("bash", {"command": "echo hi"}), "done"])
+    with _ov(tmp_path, llm=llm) as ov:
+        session = ov.create_session(agent="build")
+        resp = session.send("run it", )
+        # auto-allow so we get a complete turn
+        if resp.state == SessionState.WAITING:
+            resp = session.reply(resp.request.id, "allow")
+
+        ll = _messages_to_litellm(session.messages())
+        roles = [m["role"] for m in ll]
+        assert "tool" in roles
+        asst = next(m for m in ll if m["role"] == "assistant" and m.get("tool_calls"))
+        assert asst["tool_calls"][0]["function"]["name"] == "bash"
+
+
+def test_messages_to_litellm_skips_empty_assistant_messages(tmp_path):
+    """Assistant messages with no text and no tool calls must be omitted."""
+    from openvibe.api import _messages_to_litellm
+    from openvibe.session import session as _session_store
+    from openvibe.config import MessageRole
+
+    llm = MockLLM({"hi": "hello"})
+    with _ov(tmp_path, llm=llm) as ov:
+        s = ov.create_session()
+        s.send("hi")
+        msgs = s.messages()
+        # Manually add an empty assistant message
+        _session_store.add_message(ov._db, s.id, MessageRole.ASSISTANT)
+        all_msgs = s.messages()
+        ll = _messages_to_litellm(all_msgs)
+        # The empty assistant message must be skipped
+        empty = [m for m in ll if m["role"] == "assistant" and not m.get("content") and not m.get("tool_calls")]
+        assert not empty
+
+
+# ---------------------------------------------------------------------------
+# run() with custom agent
+# ---------------------------------------------------------------------------
+
+def test_run_with_plan_agent(tmp_path):
+    llm = MockLLM({"analyse this": "analysis done"})
+    with _ov(tmp_path, llm=llm) as ov:
+        resp = ov.run("analyse this", agent="plan")
+        assert resp.state == SessionState.IDLE
+        assert resp.text == "analysis done"
+
+
+# ---------------------------------------------------------------------------
+# FSM edge cases
+# ---------------------------------------------------------------------------
+
+def test_send_after_error_state_raises(tmp_path):
+    """After the session enters ERROR, send() must raise InvalidStateError."""
+    def boom(model, messages, **kw):
+        raise RuntimeError("boom")
+
+    with _ov(tmp_path, llm=boom) as ov:
+        session = ov.create_session()
+        resp = session.send("anything")
+        assert resp.state == SessionState.ERROR
+        # Session is now in ERROR state — send() must reject it
+        with pytest.raises(InvalidStateError):
+            session.send("try again")
+
+
+def test_reply_in_waiting_with_wrong_request_id_still_resumes(tmp_path):
+    """The sync worker ignores the request_id value and uses only the option."""
+    llm = ScriptedMockLLM([("bash", {"command": "echo hi"}), "done"])
+    with _ov(tmp_path, llm=llm) as ov:
+        session = ov.create_session(agent="build")
+        waiting = session.send("run it")
+        assert waiting.state == SessionState.WAITING
+        # Passing a completely wrong request_id — worker must still resume
+        done = session.reply("wrong-request-id-entirely", "allow")
+        assert done.state == SessionState.IDLE
+
+
+# ---------------------------------------------------------------------------
+# allow_always permission option
+# ---------------------------------------------------------------------------
+
+def test_permission_allow_always_resumes_to_idle(tmp_path):
+    """reply with 'allow_always' must behave like 'allow' in the sync path."""
+    llm = ScriptedMockLLM([("bash", {"command": "echo hi"}), "done"])
+    with _ov(tmp_path, llm=llm) as ov:
+        session = ov.create_session(agent="build")
+        waiting = session.send("run it")
+        assert waiting.state == SessionState.WAITING
+        done = session.reply(waiting.request.id, "allow_always")
+        assert done.state == SessionState.IDLE
+        assert done.text == "done"
+
+
+# ---------------------------------------------------------------------------
+# _messages_to_litellm — tool without output
+# ---------------------------------------------------------------------------
+
+def test_messages_to_litellm_tool_without_output(tmp_path):
+    """ToolPart with output=None must not emit a tool result row."""
+    from openvibe.api import _messages_to_litellm
+    from openvibe.config import MessageRole, ToolStateStatus
+    from openvibe.session import session as _session_store
+    from openvibe.session.models import ToolPart, ToolState
+
+    with _ov(tmp_path) as ov:
+        s = ov.create_session()
+        # Create an assistant message with a ToolPart that has no output yet
+        msg = _session_store.add_message(ov._db, s.id, MessageRole.ASSISTANT)
+        _session_store.upsert_part(
+            ov._db, msg.id, 0,
+            ToolPart(state=ToolState(
+                status=ToolStateStatus.RUNNING,
+                call_id="call_x",
+                tool_name="bash",
+                input={"command": "ls"},
+                output=None,  # no output yet
+            ))
+        )
+        ll = _messages_to_litellm(s.messages())
+        tool_result_rows = [m for m in ll if m.get("role") == "tool"]
+        assert tool_result_rows == []
+
+
+# ---------------------------------------------------------------------------
+# Session message isolation
+# ---------------------------------------------------------------------------
+
+def test_sessions_have_isolated_message_history(tmp_path):
+    """Messages from session A must not appear in session B."""
+    llm = MockLLM({"a": "reply_a", "b": "reply_b"})
+    with _ov(tmp_path, llm=llm) as ov:
+        sa = ov.create_session()
+        sb = ov.create_session()
+        sa.send("a")
+        sb.send("b")
+        contents_a = [
+            p.content
+            for m in sa.messages()
+            for p in m.parts
+            if hasattr(p, "content")
+        ]
+        contents_b = [
+            p.content
+            for m in sb.messages()
+            for p in m.parts
+            if hasattr(p, "content")
+        ]
+        assert "reply_a" in contents_a
+        assert "reply_a" not in contents_b
+        assert "reply_b" in contents_b
+        assert "reply_b" not in contents_a
+
+
+# ---------------------------------------------------------------------------
+# project_dir property
+# ---------------------------------------------------------------------------
+
+def test_project_dir_property(tmp_path):
+    with _ov(tmp_path) as ov:
+        assert ov.project_dir == tmp_path.resolve()
