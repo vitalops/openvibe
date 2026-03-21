@@ -40,6 +40,10 @@ class OpenvibeApp(App[None]):
         self.ov: OpenVibe | None = None
         # Cache Session objects so state is preserved across screen pushes/pops.
         self._session_cache: dict[str, Any] = {}
+        # Cache pending-permission dicts keyed by session_id so they survive
+        # screen re-mounts (the request_id must be preserved for the async
+        # PermissionService to resolve its Future correctly).
+        self._pending_permissions: dict[str, Any] = {}
         super().__init__()
 
     def compose(self) -> ComposeResult:
@@ -68,6 +72,17 @@ class OpenvibeApp(App[None]):
             assert self.ov is not None
             self._session_cache[session_id] = self.ov.get_session(session_id)
         return self._session_cache[session_id]
+
+    def set_pending_permission(self, session_id: str, pending: Any) -> None:
+        """Store or clear the pending-permission dict for a session."""
+        if pending is None:
+            self._pending_permissions.pop(session_id, None)
+        else:
+            self._pending_permissions[session_id] = pending
+
+    def get_pending_permission(self, session_id: str) -> Any:
+        """Return the pending-permission dict for a session, or None."""
+        return self._pending_permissions.get(session_id)
 
     def action_sessions(self) -> None:
         from openvibe.tui.screens.sessions import SessionListScreen

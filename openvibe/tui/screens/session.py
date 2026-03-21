@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import queue as _queue
 from typing import Any
 
 from textual import on, work
@@ -43,8 +42,6 @@ class SessionScreen(Screen):
         self._session_id = session_id
         self._session_title: str | None = None
         self._pending_permission: dict | None = None
-        # Queue used by the streaming worker to receive permission replies.
-        self._perm_reply: _queue.Queue[tuple[str, str]] = _queue.Queue(maxsize=1)
         # Tracks the current assistant message ID for token routing.
         self._current_msg_id: str = ""
         # When a permission is resolved we store the permission message ID here
@@ -68,7 +65,78 @@ class SessionScreen(Screen):
         self._session_title = info.title or None
         self._refresh_header()
         await self._load_history(session)
-        self.query_one(InputBar).focus_input()
+
+        input_bar = self.query_one(InputBar)
+
+        if session.state == SessionState.WAITING:
+            # Same-process case: navigated away and back without answering.
+            # The live worker thread is still blocked waiting for our reply.
+            pending = self.app.get_pending_permission(self._session_id)  # type: ignore[attr-defined]
+            if pending:
+                self._pending_permission = pending
+                input_bar.unfreeze()
+                input_bar.set_status(
+                    "[dim]1[/dim] allow  [dim]2[/dim] always  [dim]3[/dim] deny"
+                    "   [dim](enter = 1)[/dim]"
+                )
+        elif self._session_was_interrupted(session):
+            # Restart case: app was closed while a permission prompt was pending.
+            # The worker thread is gone; we cannot resume via reply().
+            # Reconstruct the permission prompt so the user can allow/deny
+            # normally.  On choice, a new turn is started; the processor will
+            # inject a synthetic result for the interrupted tool so the LLM
+            # can retry (allow) or cancel (deny).
+            interrupted_tool = self._get_interrupted_tool(session)
+            perm_msg = self._get_last_permission_message(session)
+            if interrupted_tool and perm_msg:
+                tool_name = interrupted_tool.state.tool_name
+                arg_val = next(iter(interrupted_tool.state.input.values()), None)
+                self._pending_permission = {
+                    "request_id": None,
+                    "tool": tool_name,
+                    "description": f"run {tool_name}",
+                    "argument": str(arg_val) if arg_val is not None else None,
+                    "message_id": perm_msg.id,
+                    "interrupted": True,
+                }
+                input_bar.unfreeze()
+                input_bar.set_status(
+                    "[dim]1[/dim] allow  [dim]2[/dim] always  [dim]3[/dim] deny"
+                    "   [dim](enter = 1)[/dim]"
+                )
+            else:
+                input_bar.set_status(
+                    "[dim]Session was interrupted mid-tool. Send a message to continue.[/dim]"
+                )
+
+        input_bar.focus_input()
+
+    @staticmethod
+    def _session_was_interrupted(session: Any) -> bool:
+        """Return True when the session has unfinished tool calls in its history."""
+        return SessionScreen._get_interrupted_tool(session) is not None
+
+    @staticmethod
+    def _get_interrupted_tool(session: Any) -> "ToolPart | None":
+        """Return the first ToolPart with no output (interrupted mid-permission)."""
+        from openvibe.session.models import ToolPart
+
+        for msg in session.messages():
+            for part in msg.parts:
+                if isinstance(part, ToolPart) and part.state.call_id and part.state.output is None:
+                    return part
+        return None
+
+    @staticmethod
+    def _get_last_permission_message(session: Any) -> Any:
+        """Return the last PERMISSION message from the session history, or None."""
+        from openvibe.config import MessageRole
+
+        last = None
+        for msg in session.messages():
+            if msg.role == MessageRole.PERMISSION:
+                last = msg
+        return last
 
     # ------------------------------------------------------------------
     # Setup helpers
@@ -81,8 +149,20 @@ class SessionScreen(Screen):
             widget = await msg_list.add_message(msg.id, role)
             for i, part in enumerate(msg.parts):
                 if isinstance(part, TextPart):
-                    widget.append_text(part.content)
+                    # Permission messages are stored with Rich markup already
+                    # embedded; use replace_text (no escaping) so tags render
+                    # correctly.  All other roles store plain text and need the
+                    # escaping that append_text provides.
+                    if role == "permission":
+                        widget.replace_text(part.content)
+                    else:
+                        widget.append_text(part.content)
                 elif isinstance(part, ToolPart):
+                    # Skip interrupted tool parts (output=None) — they have
+                    # no result to display yet and will be rendered below the
+                    # permission message once the user allows/denies on resume.
+                    if part.state.output is None and part.state.call_id:
+                        continue
                     await widget.add_tool(i, part.state.model_dump())
 
     def _refresh_header(self, *, streaming: bool = False) -> None:
@@ -106,7 +186,7 @@ class SessionScreen(Screen):
         input_bar.record_submission(event.text)
         input_bar.freeze()
         self._refresh_header(streaming=True)
-        self._stream_message(event.text)
+        self._start_turn(event.text)
 
     @on(InputBar.HistoryNav)
     def handle_history_nav(self, event: InputBar.HistoryNav) -> None:
@@ -119,6 +199,7 @@ class SessionScreen(Screen):
     async def _handle_permission_choice(self, text: str) -> None:
         pending = self._pending_permission
         self._pending_permission = None
+        self.app.set_pending_permission(self._session_id, None)  # type: ignore[attr-defined]
 
         choice = text.strip().lower()
         match choice:
@@ -145,37 +226,45 @@ class SessionScreen(Screen):
                 f"[dim]→[/dim] {label}"
             )
 
+        # Re-freeze while the agent finishes executing the tool.
+        self.query_one(InputBar).freeze()
+
+        if pending.get("interrupted"):
+            # Restart case: no live worker thread exists.  Execute the tool
+            # directly (allow) or inject a denied result, then continue the
+            # LLM turn — without adding a new user message.
+            if pending.get("message_id"):
+                self._perm_tool_target = pending["message_id"]
+            self._start_resume_interrupted_turn(option in ("allow", "allow_always"))
+            return
+
         # Route the completed tool widget into this permission message.
         self._perm_tool_target = pending["message_id"]
 
-        # Re-freeze while the worker waits for the tool to complete.
-        self.query_one(InputBar).freeze()
-
-        # Unblock the streaming worker.
-        self._perm_reply.put((pending["request_id"], option))
+        # Resume the agent turn in a fresh background worker.  This avoids
+        # blocking the previous worker on a queue and means the screen can be
+        # re-mounted at any point without leaving orphaned threads.
+        self._resume_turn(pending["request_id"], option)
 
     # ------------------------------------------------------------------
-    # Streaming worker (runs in a background thread)
+    # Agent turn workers (each runs in a background thread and exits after
+    # delivering one response — IDLE, WAITING, or ERROR)
     # ------------------------------------------------------------------
 
-    @work(thread=True)
-    def _stream_message(self, text: str) -> None:
-        """Run the agent turn in a background thread via Session.send().
+    def _make_callbacks(self, user_text: str | None) -> tuple:
+        """Return (on_message, on_token, on_tool) callbacks for a turn.
 
-        Callbacks route streaming events back to the TUI via call_from_thread.
-        Permission requests pause the worker until the user replies via
-        the _perm_reply queue.
+        *user_text* is only needed for the initial send so the typed text can
+        be echoed into the user message widget immediately.  Pass None when
+        resuming after a permission reply.
         """
-        session = self.app.get_session(self._session_id)  # type: ignore[attr-defined]
-
         def on_message(msg_id: str, role: str) -> None:
             self.app.call_from_thread(
                 self.post_message, events.NewMessage(msg_id, role)
             )
-            if role == "user":
-                # Show the typed text immediately in the user message widget.
+            if role == "user" and user_text is not None:
                 self.app.call_from_thread(
-                    self.post_message, events.TextDelta(msg_id, text)
+                    self.post_message, events.TextDelta(msg_id, user_text)
                 )
             elif role == "assistant":
                 self._current_msg_id = msg_id
@@ -190,6 +279,39 @@ class SessionScreen(Screen):
                 self.post_message, events.ToolStateChanged(msg_id, part_index, state)
             )
 
+        return on_message, on_token, on_tool
+
+    def _dispatch_response(self, response: Any) -> None:
+        """Route a completed Response to the appropriate TUI event."""
+        if response.state == SessionState.WAITING:
+            req = response.request
+            self.app.call_from_thread(
+                self.post_message,
+                events.PermissionRequested(
+                    req.id,
+                    req.tool or "tool",
+                    req.description,
+                    self._session_id,
+                    argument=req.argument,
+                ),
+            )
+        elif response.state == SessionState.IDLE:
+            self.app.call_from_thread(
+                self.post_message, events.TurnCompleted("")
+            )
+        else:
+            error_msg = (
+                response.error.message if response.error else "Unknown error"
+            )
+            self.app.call_from_thread(
+                self.post_message, events.StreamError(error_msg)
+            )
+
+    @work(thread=True)
+    def _start_turn(self, text: str) -> None:
+        """Start a new agent turn with *text* as the user message."""
+        session = self.app.get_session(self._session_id)  # type: ignore[attr-defined]
+        on_message, on_token, on_tool = self._make_callbacks(text)
         try:
             response = session.send(
                 text,
@@ -197,35 +319,42 @@ class SessionScreen(Screen):
                 on_message=on_message,
                 on_tool=on_tool,
             )
+            self._dispatch_response(response)
+        except Exception as exc:  # noqa: BLE001
+            self.app.call_from_thread(
+                self.post_message, events.StreamError(str(exc))
+            )
 
-            while response.state == SessionState.WAITING:
-                req = response.request
-                self.app.call_from_thread(
-                    self.post_message,
-                    events.PermissionRequested(
-                        req.id,
-                        req.tool or "tool",
-                        req.description,
-                        self._session_id,
-                        argument=req.argument,
-                    ),
-                )
-                # Block this thread until the TUI user replies.
-                req_id, option = self._perm_reply.get()
-                response = session.reply(req_id, option)
+    @work(thread=True)
+    def _resume_turn(self, request_id: str, option: str) -> None:
+        """Resume a paused turn after the user has answered a permission request."""
+        session = self.app.get_session(self._session_id)  # type: ignore[attr-defined]
+        on_message, on_token, on_tool = self._make_callbacks(None)
+        try:
+            response = session.reply(request_id, option)
+            self._dispatch_response(response)
+        except Exception as exc:  # noqa: BLE001
+            self.app.call_from_thread(
+                self.post_message, events.StreamError(str(exc))
+            )
 
-            if response.state == SessionState.IDLE:
-                self.app.call_from_thread(
-                    self.post_message, events.TurnCompleted("")
-                )
-            else:
-                error_msg = (
-                    response.error.message if response.error else "Unknown error"
-                )
-                self.app.call_from_thread(
-                    self.post_message, events.StreamError(error_msg)
-                )
+    @work(thread=True)
+    def _start_resume_interrupted_turn(self, allow: bool) -> None:
+        """Resume a session interrupted mid-tool (restart case).
 
+        Executes the tool directly (allow=True) or injects a denied result,
+        then continues the LLM turn without adding a new user message.
+        """
+        session = self.app.get_session(self._session_id)  # type: ignore[attr-defined]
+        on_message, on_token, on_tool = self._make_callbacks(None)
+        try:
+            response = session.resume_interrupted(
+                allow,
+                on_token=on_token,
+                on_message=on_message,
+                on_tool=on_tool,
+            )
+            self._dispatch_response(response)
         except Exception as exc:  # noqa: BLE001
             self.app.call_from_thread(
                 self.post_message, events.StreamError(str(exc))

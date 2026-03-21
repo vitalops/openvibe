@@ -308,6 +308,50 @@ class Session:
                 daemon=True,
             ).start()
 
+    def resume_interrupted(
+        self,
+        allow: bool,
+        on_token: Callable[[str], None] | None = None,
+        on_message: Callable[[str, str], None] | None = None,
+        on_tool: Callable[[str, int, Any], None] | None = None,
+    ) -> Response:
+        """Resume a session interrupted mid-tool without adding a new user message.
+
+        Executes (allow=True) or denies (allow=False) any ToolParts with
+        output=None, then calls the LLM to produce the final response.
+        Requires the async processor path (start_async).
+        """
+        with self._lock:
+            if self._state != SessionState.IDLE:
+                raise InvalidStateError(
+                    f"resume_interrupted() requires IDLE state; current: {self._state}"
+                )
+            if self._processor is None:
+                raise RuntimeError(
+                    "resume_interrupted() requires the async processor (use start_async())"
+                )
+            self._state = SessionState.THINKING
+            self._abort_ev.clear()
+
+        from openvibe.agent.agent import resolve as _resolve
+        agent = _resolve(self._config, self._agent_name)
+
+        self._on_message = on_message
+        self._on_tool = on_tool
+        self._worker = threading.Thread(
+            target=_run_interrupted_async_threaded,
+            args=(
+                allow, on_token, on_message, on_tool, None,
+                self._info, agent, self._db,
+                self._processor, self._bus, self._permissions,
+                self._result_q, self._resume_q, self._abort_ev,
+            ),
+            daemon=True,
+            name=f"openvibe-resume-{self._info.id[:8]}",
+        )
+        self._worker.start()
+        return self._collect()
+
     # ------------------------------------------------------------------
     # Abort
     # ------------------------------------------------------------------
@@ -836,6 +880,199 @@ async def _run_turn_async(
 
 
 # ---------------------------------------------------------------------------
+# Interrupted-resume async worker
+# ---------------------------------------------------------------------------
+
+def _run_interrupted_async_threaded(
+    allow: bool,
+    on_token: Callable[[str], None] | None,
+    on_message: Callable[[str, str], None] | None,
+    on_tool: Callable[[str, int, Any], None] | None,
+    callback: Callable[["Response"], None] | None,
+    session_info: Any,
+    agent: Any,
+    db: Any,
+    processor: Any,
+    bus: Any,
+    permissions: Any,
+    result_q: "queue.Queue[Response]",
+    resume_q: "queue.Queue[tuple[str, str]]",
+    abort_ev: threading.Event,
+) -> None:
+    import asyncio
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(
+            _run_interrupted_async(
+                allow, on_token, on_message, on_tool, callback,
+                session_info, agent, db,
+                processor, bus, permissions,
+                result_q, resume_q, abort_ev,
+            )
+        )
+    finally:
+        loop.close()
+        asyncio.set_event_loop(None)
+
+
+async def _run_interrupted_async(
+    allow: bool,
+    on_token: Callable[[str], None] | None,
+    on_message: Callable[[str, str], None] | None,
+    on_tool: Callable[[str, int, Any], None] | None,
+    callback: Callable[["Response"], None] | None,
+    session_info: Any,
+    agent: Any,
+    db: Any,
+    processor: Any,
+    bus: Any,
+    permissions: Any,
+    result_q: "queue.Queue[Response]",
+    resume_q: "queue.Queue[tuple[str, str]]",
+    abort_ev: threading.Event,
+) -> None:
+    """Resume a session interrupted mid-tool: execute the tool (or deny it),
+    then continue the LLM turn — without creating a new user message."""
+    import asyncio as _asyncio
+
+    from openvibe.config import MessageRole, PermissionAction
+    from openvibe.permission.permission import PermissionRequestedEvent
+    from openvibe.session import session as _store
+    from openvibe.session.models import (
+        MessageCreatedEvent,
+        ReasoningDeltaEvent,
+        TextDeltaEvent,
+        ToolStateChangedEvent,
+        TurnCompletedEvent,
+    )
+
+    accumulated_text = ""
+    abort_async = _asyncio.Event()
+
+    async def _watch_abort() -> None:
+        loop = _asyncio.get_running_loop()
+        await loop.run_in_executor(None, abort_ev.wait)
+        abort_async.set()
+
+    abort_watcher = _asyncio.create_task(_watch_abort())
+
+    try:
+        subscribed = _asyncio.Event()
+
+        async def run_processor() -> None:
+            exc_to_raise = None
+            success = False
+            try:
+                await subscribed.wait()
+                await processor.resume_interrupted(session_info, agent, allow, abort_async)
+                success = True
+            except Exception as exc:  # noqa: BLE001
+                exc_to_raise = exc
+            finally:
+                if not success:
+                    await bus.publish(
+                        TurnCompletedEvent(session_id=session_info.id, message_id="")
+                    )
+            if exc_to_raise:
+                raise exc_to_raise
+
+        async def consume_events() -> None:
+            nonlocal accumulated_text
+            async with bus.subscribe() as bus_events:
+                subscribed.set()
+                async for event in bus_events:
+                    if getattr(event, "session_id", None) != session_info.id:
+                        continue
+
+                    if isinstance(event, MessageCreatedEvent) and event.message:
+                        msg = event.message
+                        if on_message and str(msg.role) == "assistant":
+                            on_message(msg.id, "assistant")
+
+                    elif isinstance(event, TextDeltaEvent):
+                        accumulated_text += event.content
+                        if on_token:
+                            on_token(event.content)
+
+                    elif isinstance(event, ReasoningDeltaEvent):
+                        pass
+
+                    elif isinstance(event, ToolStateChangedEvent):
+                        if on_tool:
+                            on_tool(event.message_id, event.part_index, event.state or {})
+
+                    elif isinstance(event, PermissionRequestedEvent):
+                        req = InputRequest(
+                            id=event.request_id,
+                            kind="permission",
+                            description=event.description or f"Allow '{event.tool}'?",
+                            tool=event.tool,
+                            argument=event.argument,
+                            options=[
+                                Option("allow",        "Allow once"),
+                                Option("allow_always", "Always allow"),
+                                Option("deny",         "Deny"),
+                            ],
+                        )
+                        messages = _store.list_messages(db, session_info.id)
+                        result_q.put(Response(
+                            state=SessionState.WAITING,
+                            text=accumulated_text,
+                            messages=messages,
+                            request=req,
+                        ))
+
+                        loop = _asyncio.get_running_loop()
+                        _req_id, option = await loop.run_in_executor(None, resume_q.get)
+
+                        decision = (
+                            PermissionAction.ALLOW
+                            if option in ("allow", "allow_always")
+                            else PermissionAction.DENY
+                        )
+                        remember = option == "allow_always"
+                        permissions.reply(
+                            request_id=_req_id,
+                            decision=decision,
+                            remember=remember,
+                            project_id=session_info.project_id,
+                            tool=event.tool,
+                        )
+
+                    elif isinstance(event, TurnCompletedEvent):
+                        break
+
+        await _asyncio.gather(run_processor(), consume_events())
+
+        final_messages = _store.list_messages(db, session_info.id)
+        response = Response(
+            state=SessionState.IDLE,
+            text=accumulated_text,
+            messages=final_messages,
+        )
+
+    except Exception as exc:  # noqa: BLE001
+        kind, msg_str = _classify_error(exc)
+        response = Response(
+            state=SessionState.ERROR,
+            text=accumulated_text,
+            error=ErrorInfo(kind=kind, message=msg_str),
+        )
+
+    finally:
+        abort_watcher.cancel()
+        try:
+            await abort_watcher
+        except _asyncio.CancelledError:
+            pass
+
+    result_q.put(response)
+    if callback:
+        callback(response)
+
+
+# ---------------------------------------------------------------------------
 # Sync worker — runs entirely in a background thread
 # ---------------------------------------------------------------------------
 
@@ -1242,14 +1479,21 @@ def _messages_to_litellm(messages: list[Any]) -> list[dict[str, Any]]:
             ]
         result.append(d)
 
-        # Tool results must immediately follow the assistant message
+        # Tool results must immediately follow the assistant message.
+        # If a tool was interrupted (app quit while waiting for permission),
+        # output is None — emit a synthetic result so the LLM message sequence
+        # remains valid (every tool_call must have a matching tool result).
         for p in tool_parts:
-            if p.state.output is not None:
-                result.append({
-                    "role": "tool",
-                    "tool_call_id": p.state.call_id,
-                    "content": p.state.output or "",
-                })
+            content = (
+                p.state.output
+                if p.state.output is not None
+                else "Tool execution was interrupted (session was closed before the tool completed)."
+            )
+            result.append({
+                "role": "tool",
+                "tool_call_id": p.state.call_id,
+                "content": content,
+            })
 
     return result
 

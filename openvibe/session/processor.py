@@ -366,6 +366,90 @@ class SessionProcessor:
 
         return assistant_msg
 
+    async def resume_interrupted(
+        self,
+        session: SessionInfo,
+        agent: "AgentInfo",
+        allow: bool,
+        abort: asyncio.Event | None = None,
+    ) -> MessageInfo:
+        """Execute (or deny) interrupted tool calls, then get the LLM's final response.
+
+        Used when the app is restarted after being closed mid-permission.
+        The user has already made their choice, so the tool is executed
+        directly without going through the permission service.
+        """
+        import time as _time
+        abort = abort or asyncio.Event()
+        history = session_store.list_messages(self._db, session.id)
+        last_user_msg: MessageInfo | None = None
+
+        for msg in history:
+            if msg.role == MessageRole.USER:
+                last_user_msg = msg
+            if msg.role != MessageRole.ASSISTANT:
+                continue
+            for i, part in enumerate(msg.parts):
+                if not isinstance(part, ToolPart) or not part.state.call_id or part.state.output is not None:
+                    continue
+
+                if allow:
+                    tool = self._registry.get(part.state.tool_name)
+                    if tool:
+                        from openvibe.tool.base import ToolContext
+                        ctx = ToolContext(
+                            session_id=session.id,
+                            message_id=msg.id,
+                            agent_name=agent.name,
+                            project_id=session.project_id,
+                            working_dir=session.directory,
+                            abort=abort,
+                            call_id=part.state.call_id,
+                            _permissions=None,  # user already approved; bypass check
+                        )
+                        ctx._db = self._db  # type: ignore[attr-defined]
+                        t0 = _time.monotonic()
+                        try:
+                            result = await tool(ctx, part.state.input)
+                            part.state.status = ToolStateStatus.ERROR if result.error else ToolStateStatus.COMPLETED
+                            part.state.output = result.output
+                            part.state.time_end = _time.monotonic() - t0
+                            if result.error:
+                                part.state.error = result.output
+                        except Exception as exc:
+                            part.state.status = ToolStateStatus.ERROR
+                            part.state.output = str(exc)
+                            part.state.error = str(exc)
+                    else:
+                        part.state.status = ToolStateStatus.ERROR
+                        part.state.output = f"Tool '{part.state.tool_name}' not found."
+                        part.state.error = part.state.output
+                else:
+                    part.state.status = ToolStateStatus.ERROR
+                    part.state.output = "Permission denied."
+                    part.state.error = "Permission denied."
+
+                session_store.upsert_part(self._db, msg.id, i, part)
+                await self._bus.publish(
+                    ToolStateChangedEvent(
+                        session_id=session.id,
+                        message_id=msg.id,
+                        part_index=i,
+                        state=part.state.model_dump(),
+                    )
+                )
+
+        if last_user_msg is None:
+            final_msg = session_store.add_message(
+                self._db, session.id, MessageRole.ASSISTANT, [TextPart(content="")]
+            )
+            await self._bus.publish(TurnCompletedEvent(session_id=session.id, message_id=final_msg.id))
+            return final_msg
+
+        # Continue the LLM turn using the existing last user message as anchor.
+        # The updated tool results are now in the DB — no new user message is created.
+        return await self.run(session, agent, "", abort, user_message=last_user_msg)
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -523,16 +607,23 @@ def _to_llm_messages(history: list[MessageInfo], agent: "AgentInfo") -> list[Mes
                     Message(role="assistant", content=content, tool_calls=tool_calls)
                 )
 
-                # Add tool results as separate tool messages
+                # Add tool results as separate tool messages.
+                # If a tool was interrupted (app quit while permission was pending),
+                # output is None — emit a synthetic result so the LLM message
+                # sequence remains valid (every tool_call needs a matching result).
                 for part in tool_parts:
-                    if part.state.output is not None:
-                        messages.append(
-                            Message(
-                                role="tool",
-                                content=part.state.output or "",
-                                tool_call_id=part.state.call_id,
-                            )
+                    content = (
+                        part.state.output
+                        if part.state.output is not None
+                        else "Tool execution was interrupted (session was closed before the tool completed)."
+                    )
+                    messages.append(
+                        Message(
+                            role="tool",
+                            content=content,
+                            tool_call_id=part.state.call_id,
                         )
+                    )
 
     return messages
 

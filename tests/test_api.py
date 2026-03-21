@@ -857,7 +857,13 @@ def test_permission_allow_always_resumes_to_idle(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_messages_to_litellm_tool_without_output(tmp_path):
-    """ToolPart with output=None must not emit a tool result row."""
+    """ToolPart with output=None must emit a synthetic tool result.
+
+    When the app is closed while a permission request is pending, the ToolPart
+    is saved with output=None.  The LLM API (e.g. OpenAI/Azure) requires every
+    tool_call to be followed by a matching tool result, so we inject a synthetic
+    "interrupted" message to avoid a BadRequestError on the next send().
+    """
     from openvibe.api import _messages_to_litellm
     from openvibe.config import MessageRole, ToolStateStatus
     from openvibe.session import session as _session_store
@@ -874,12 +880,15 @@ def test_messages_to_litellm_tool_without_output(tmp_path):
                 call_id="call_x",
                 tool_name="bash",
                 input={"command": "ls"},
-                output=None,  # no output yet
+                output=None,  # interrupted — no output
             ))
         )
         ll = _messages_to_litellm(s.messages())
         tool_result_rows = [m for m in ll if m.get("role") == "tool"]
-        assert tool_result_rows == []
+        # A synthetic result must be present so the message sequence is valid
+        assert len(tool_result_rows) == 1
+        assert tool_result_rows[0]["tool_call_id"] == "call_x"
+        assert "interrupted" in tool_result_rows[0]["content"].lower()
 
 
 # ---------------------------------------------------------------------------
