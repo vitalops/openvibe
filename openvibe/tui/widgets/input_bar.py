@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from textual import events
@@ -128,6 +129,7 @@ class InputBar(Widget):
         self._draft: str = ""
         self._spinner_frame: int = 0
         self._spinner_timer: Timer | None = None
+        self._thinking_start: float = 0.0
         super().__init__(**kwargs)
 
     def compose(self) -> ComposeResult:
@@ -144,15 +146,30 @@ class InputBar(Widget):
     # Freeze / unfreeze (spinner in status row, input stays visible)
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _fmt_elapsed(seconds: int) -> str:
+        if seconds < 60:
+            return f"{seconds}s"
+        if seconds < 3600:
+            return f"{seconds // 60}m{seconds % 60}s"
+        h = seconds // 3600
+        m = (seconds % 3600) // 60
+        s = seconds % 60
+        return f"{h}h{m}m{s}s"
+
     def freeze(self) -> None:
         self.query_one(ChatInput)._submittable = False
         self._spinner_frame = 0
+        self._thinking_start = time.monotonic()
         self._tick_spinner()
         self._spinner_timer = self.set_interval(0.08, self._tick_spinner)
 
     def _tick_spinner(self) -> None:
         frame = _SPINNER_FRAMES[self._spinner_frame % len(_SPINNER_FRAMES)]
-        self.query_one("#status", Static).update(f"[dim]{frame} thinking…[/dim]")
+        elapsed = self._fmt_elapsed(int(time.monotonic() - self._thinking_start))
+        self.query_one("#status", Static).update(
+            f"[dim]{frame} thinking… {elapsed}[/dim]"
+        )
         self._spinner_frame += 1
 
     def _stop_spinner(self) -> None:
