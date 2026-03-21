@@ -13,6 +13,7 @@ from typing import Any
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import Footer
+from textual import work  # noqa: F401 – used via @work decorator
 
 from openvibe.api import OpenVibe
 
@@ -50,6 +51,18 @@ class OpenvibeApp(App[None]):
         yield Footer()
 
     async def on_mount(self) -> None:
+        if _needs_setup(self._project_dir):
+            from openvibe.tui.screens.setup import SetupWizardScreen
+            self.push_screen(SetupWizardScreen(), callback=self._after_wizard)
+        else:
+            self._finish_startup()
+
+    def _after_wizard(self, _: None) -> None:
+        """Called when the setup wizard is dismissed (saved or skipped)."""
+        self._finish_startup()
+
+    @work
+    async def _finish_startup(self) -> None:
         self.ov = await OpenVibe(project_dir=self._project_dir).start_async()
         from openvibe.tui.screens.welcome import WelcomeScreen
         await self.push_screen(WelcomeScreen())
@@ -93,6 +106,15 @@ class OpenvibeApp(App[None]):
                 self.push_screen(SessionScreen(session_id))
 
         self.push_screen(SessionListScreen(), on_dismiss)
+
+
+def _needs_setup(project_dir: Path) -> bool:
+    """Return True if no model is configured from any config source."""
+    from openvibe.config import load_config
+    try:
+        return load_config(project_dir).model is None
+    except Exception:
+        return True
 
 
 def run_tui(project_dir: Path | None = None) -> None:

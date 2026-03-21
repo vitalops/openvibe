@@ -124,6 +124,21 @@ PROVIDERS: list[ProviderInfo] = [
         env_key="OPENROUTER_API_KEY",
         models=[],  # populated dynamically via list_models_from_api()
     ),
+    ProviderInfo(
+        id="azure",
+        name="Azure OpenAI",
+        litellm_prefix="azure",
+        env_key="AZURE_API_KEY",
+        # Azure model IDs are deployment names you create in the Azure portal.
+        # These are the most common deployment names; the user can also enter a custom one.
+        models=[
+            _m("azure", "gpt-4o", "GPT-4o", context_window=128_000, supports_vision=True),
+            _m("azure", "gpt-4o-mini", "GPT-4o Mini", context_window=128_000),
+            _m("azure", "gpt-4", "GPT-4", context_window=8_192),
+            _m("azure", "gpt-4-turbo", "GPT-4 Turbo", context_window=128_000),
+            _m("azure", "gpt-35-turbo", "GPT-3.5 Turbo", context_window=16_385),
+        ],
+    ),
 ]
 
 _PROVIDER_MAP: dict[str, ProviderInfo] = {p.id: p for p in PROVIDERS}

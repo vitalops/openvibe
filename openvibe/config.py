@@ -68,9 +68,10 @@ class ModelRef(BaseModel):
 
 
 class ProviderConfig(BaseModel):
-    """Per-provider overrides (api_key, base_url, custom options)."""
+    """Per-provider overrides (api_key, base_url, api_version, custom options)."""
     api_key: str | None = None
     base_url: str | None = None
+    api_version: str | None = None   # e.g. "2024-02-01" for Azure OpenAI
     # Arbitrary provider-specific options forwarded to litellm
     options: dict[str, Any] = Field(default_factory=dict)
 
@@ -243,4 +244,35 @@ def load_config(project_dir: Path | None = None) -> Config:
         raw = _deep_merge(raw, json.loads(cfg_content))
 
     raw = _expand_env(raw)
-    return Config.model_validate(raw)
+    config = Config.model_validate(raw)
+    _apply_provider_env(config)
+    return config
+
+
+# Env var names used by litellm for each provider field.
+# provider_id → (api_key_var, base_url_var, api_version_var)
+_PROVIDER_ENV: dict[str, tuple[str | None, str | None, str | None]] = {
+    "anthropic":  ("ANTHROPIC_API_KEY",  None,             None),
+    "openai":     ("OPENAI_API_KEY",     "OPENAI_API_BASE", None),
+    "google":     ("GEMINI_API_KEY",     None,             None),
+    "groq":       ("GROQ_API_KEY",       None,             None),
+    "mistral":    ("MISTRAL_API_KEY",    None,             None),
+    "openrouter": ("OPENROUTER_API_KEY", None,             None),
+    "azure":      ("AZURE_API_KEY",      "AZURE_API_BASE", "AZURE_API_VERSION"),
+}
+
+
+def _apply_provider_env(config: Config) -> None:
+    """Push provider config values into os.environ so litellm picks them up.
+
+    Only sets variables that are absent from the environment — existing env
+    vars (e.g. already exported in the shell) always take precedence.
+    """
+    for provider_id, pcfg in config.provider.items():
+        key_var, base_var, ver_var = _PROVIDER_ENV.get(provider_id, (None, None, None))
+        if pcfg.api_key and key_var:
+            os.environ.setdefault(key_var, pcfg.api_key)
+        if pcfg.base_url and base_var:
+            os.environ.setdefault(base_var, pcfg.base_url)
+        if pcfg.api_version and ver_var:
+            os.environ.setdefault(ver_var, pcfg.api_version)
