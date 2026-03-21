@@ -5,8 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 from rich.markup import escape as _escape
-from rich.markdown import Markdown as _RichMarkdown
 from rich.syntax import Syntax as _Syntax
+
+from openvibe.tui.markdown import render_markdown
 from textual.app import ComposeResult
 from textual.containers import VerticalScroll
 from textual.widget import Widget
@@ -144,7 +145,7 @@ class MessageWidget(Widget):
         display: none;
     }
     MessageWidget.user {
-        background: $surface;
+        background: #3A3A3A;
         padding: 0 2;
     }
     MessageWidget.error {
@@ -176,7 +177,7 @@ class MessageWidget(Widget):
         widget.remove_class("hidden-text")
         if self._role == "assistant":
             self._text += content
-            widget.update(_RichMarkdown(self._text, code_theme="monokai"))
+            widget.update(render_markdown(self._text))
         else:
             safe = _escape(content)
             if not self._text and self._role == "user":
@@ -192,7 +193,7 @@ class MessageWidget(Widget):
         widget = self.query_one(f"#text-{self._message_id}", Static)
         widget.remove_class("hidden-text")
         if self._role == "assistant":
-            widget.update(_RichMarkdown(self._text, code_theme="monokai"))
+            widget.update(render_markdown(self._text))
         else:
             widget.update(self._text)
 
