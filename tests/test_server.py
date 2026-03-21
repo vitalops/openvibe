@@ -335,6 +335,80 @@ def test_reply_permission_remember_flag(client: TestClient) -> None:
 
 
 # ---------------------------------------------------------------------------
+# GET /events  and  GET /events/{session_id}
+# ---------------------------------------------------------------------------
+#
+# These endpoints return infinite SSE streams that block forever on an async
+# queue.  We patch EventBus.subscribe with an async context manager that
+# immediately returns an empty generator so TestClient can complete the
+# request and we can assert on status code and content-type.
+
+from contextlib import asynccontextmanager
+from unittest.mock import patch as _mock_patch
+
+
+@asynccontextmanager
+async def _empty_bus_subscribe(self):  # type: ignore[override]
+    """Finite substitute for EventBus.subscribe() — yields zero events."""
+    async def _gen():
+        return
+        yield  # pragma: no cover  (makes this an async generator)
+
+    yield _gen()
+
+
+def test_global_events_returns_event_stream(client: TestClient) -> None:
+    with _mock_patch("openvibe.bus.EventBus.subscribe", _empty_bus_subscribe):
+        resp = client.get("/events")
+    assert resp.status_code == 200
+    assert "text/event-stream" in resp.headers.get("content-type", "")
+
+
+def test_session_events_returns_event_stream(client: TestClient) -> None:
+    created = _create_session(client)
+    with _mock_patch("openvibe.bus.EventBus.subscribe", _empty_bus_subscribe):
+        resp = client.get(f"/events/{created['id']}")
+    assert resp.status_code == 200
+    assert "text/event-stream" in resp.headers.get("content-type", "")
+
+
+def test_session_events_filtered_to_session_id(client: TestClient) -> None:
+    """The per-session stream only yields events whose session_id matches."""
+    from dataclasses import dataclass
+
+    created = _create_session(client)
+    sid = created["id"]
+    other_sid = "other-session"
+
+    @dataclass
+    class FakeEvent:
+        session_id: str
+
+    emitted: list[FakeEvent] = [
+        FakeEvent(session_id=sid),
+        FakeEvent(session_id=other_sid),
+        FakeEvent(session_id=sid),
+    ]
+
+    @asynccontextmanager
+    async def _seeded_subscribe(self):  # type: ignore[override]
+        async def _gen():
+            for ev in emitted:
+                yield ev
+
+        yield _gen()
+
+    with _mock_patch("openvibe.bus.EventBus.subscribe", _seeded_subscribe):
+        resp = client.get(f"/events/{sid}")
+
+    # Both sid events should be in the response; the other_sid event should not.
+    assert resp.status_code == 200
+    text = resp.text
+    assert text.count(sid) >= 2
+    assert other_sid not in text
+
+
+# ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
 
@@ -412,6 +486,201 @@ def test_serialize_event_handles_non_serialisable_field() -> None:
     # Path is serialised via default=str.
     assert data["path"] == "/tmp"
 
+
+# ---------------------------------------------------------------------------
+# GET /session/{id}/state
+# ---------------------------------------------------------------------------
+
+def test_get_session_state_idle(client: TestClient) -> None:
+    created = _create_session(client)
+    resp = client.get(f"/session/{created['id']}/state")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["state"] == "idle"
+    assert data["pending_permission"] is None
+
+
+def test_get_session_state_not_found(client: TestClient) -> None:
+    resp = client.get("/session/nonexistent/state")
+    assert resp.status_code == 404
+
+
+def test_get_session_state_interrupted(tmp_path: Path) -> None:
+    """A session with an unresolved ToolPart (output=None) reports 'interrupted'."""
+    from openvibe.config import ToolStateStatus
+    from openvibe.db import create_database
+    from openvibe.session import session as session_store
+    from openvibe.session.models import ToolPart, ToolState
+    from openvibe.config import MessageRole
+
+    db = create_database(tmp_path / "test.db")
+    app = create_app(project_dir=tmp_path, config=Config(), db=db, llm=_FakeLLM())
+
+    with TestClient(app) as c:
+        created = _create_session(c)
+        sid = created["id"]
+
+        # Manually inject an assistant message with an interrupted ToolPart.
+        tool_part = ToolPart(
+            state=ToolState(
+                status=ToolStateStatus.RUNNING,
+                call_id="call_abc",
+                tool_name="bash",
+                input={"command": "ls"},
+                output=None,  # interrupted — no output
+            )
+        )
+        session_store.add_message(db, sid, MessageRole.ASSISTANT, [tool_part])
+
+        resp = c.get(f"/session/{sid}/state")
+
+    assert resp.status_code == 200
+    assert resp.json()["state"] == "interrupted"
+
+
+def test_get_session_state_after_send_becomes_idle(client: TestClient) -> None:
+    """After a completed send the state reverts to idle."""
+    created = _create_session(client)
+    client.post(f"/session/{created['id']}/message", json={"text": "hi"})
+    resp = client.get(f"/session/{created['id']}/state")
+    assert resp.json()["state"] == "idle"
+
+
+# ---------------------------------------------------------------------------
+# POST /session/{id}/abort
+# ---------------------------------------------------------------------------
+
+def test_abort_no_active_turn(client: TestClient) -> None:
+    created = _create_session(client)
+    resp = client.post(f"/session/{created['id']}/abort")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "no_active_turn"}
+
+
+def test_abort_not_found(client: TestClient) -> None:
+    resp = client.post("/session/nonexistent/abort")
+    assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# POST /session/{id}/resume
+# ---------------------------------------------------------------------------
+
+def test_resume_not_found(client: TestClient) -> None:
+    resp = client.post("/session/nonexistent/resume", json={"allow": True})
+    assert resp.status_code == 404
+
+
+def test_resume_not_interrupted(client: TestClient) -> None:
+    """Resuming a session with no interrupted tool calls returns 400."""
+    created = _create_session(client)
+    resp = client.post(f"/session/{created['id']}/resume", json={"allow": True})
+    assert resp.status_code == 400
+
+
+def test_resume_allow_streams_sse(tmp_path: Path) -> None:
+    """Resuming with allow=True executes the tool and streams the response."""
+    from openvibe.config import ToolStateStatus, MessageRole
+    from openvibe.db import create_database
+    from openvibe.session import session as session_store
+    from openvibe.session.models import ToolPart, ToolState, TextPart
+
+    db = create_database(tmp_path / "test.db")
+    app = create_app(project_dir=tmp_path, config=Config(), db=db, llm=_FakeLLM())
+
+    with TestClient(app) as c:
+        created = _create_session(c)
+        sid = created["id"]
+
+        # Seed history: user message + interrupted assistant tool call.
+        session_store.add_message(db, sid, MessageRole.USER, [TextPart(content="run ls")])
+        tool_part = ToolPart(
+            state=ToolState(
+                status=ToolStateStatus.RUNNING,
+                call_id="call_xyz",
+                tool_name="bash",
+                input={"command": "echo hello"},
+                output=None,
+            )
+        )
+        session_store.add_message(db, sid, MessageRole.ASSISTANT, [tool_part])
+
+        resp = c.post(f"/session/{sid}/resume", json={"allow": True})
+
+    assert resp.status_code == 200
+    assert "text/event-stream" in resp.headers.get("content-type", "")
+    assert b"data:" in resp.content
+
+
+def test_resume_deny_streams_sse(tmp_path: Path) -> None:
+    """Resuming with allow=False injects a denied result and streams the response."""
+    from openvibe.config import ToolStateStatus, MessageRole
+    from openvibe.db import create_database
+    from openvibe.session import session as session_store
+    from openvibe.session.models import ToolPart, ToolState, TextPart
+
+    db = create_database(tmp_path / "test.db")
+    app = create_app(project_dir=tmp_path, config=Config(), db=db, llm=_FakeLLM())
+
+    with TestClient(app) as c:
+        created = _create_session(c)
+        sid = created["id"]
+
+        session_store.add_message(db, sid, MessageRole.USER, [TextPart(content="run ls")])
+        tool_part = ToolPart(
+            state=ToolState(
+                status=ToolStateStatus.RUNNING,
+                call_id="call_deny",
+                tool_name="bash",
+                input={"command": "echo hello"},
+                output=None,
+            )
+        )
+        session_store.add_message(db, sid, MessageRole.ASSISTANT, [tool_part])
+
+        resp = c.post(f"/session/{sid}/resume", json={"allow": False})
+
+    assert resp.status_code == 200
+    assert "text/event-stream" in resp.headers.get("content-type", "")
+
+
+def test_resume_marks_tool_completed_in_db(tmp_path: Path) -> None:
+    """After resume allow=True the interrupted ToolPart should have output in DB."""
+    from openvibe.config import ToolStateStatus, MessageRole
+    from openvibe.db import create_database
+    from openvibe.session import session as session_store
+    from openvibe.session.models import ToolPart, ToolState, TextPart
+
+    db = create_database(tmp_path / "test.db")
+    app = create_app(project_dir=tmp_path, config=Config(), db=db, llm=_FakeLLM())
+
+    with TestClient(app) as c:
+        created = _create_session(c)
+        sid = created["id"]
+
+        session_store.add_message(db, sid, MessageRole.USER, [TextPart(content="run ls")])
+        tool_part = ToolPart(
+            state=ToolState(
+                status=ToolStateStatus.RUNNING,
+                call_id="call_check",
+                tool_name="bash",
+                input={"command": "echo hello"},
+                output=None,
+            )
+        )
+        session_store.add_message(db, sid, MessageRole.ASSISTANT, [tool_part])
+
+        c.post(f"/session/{sid}/resume", json={"allow": True})
+
+        # After resume the state endpoint should no longer report interrupted.
+        state_resp = c.get(f"/session/{sid}/state")
+
+    assert state_resp.json()["state"] != "interrupted"
+
+
+# ---------------------------------------------------------------------------
+# _serialize_event helper (continued)
+# ---------------------------------------------------------------------------
 
 def test_serialize_event_bus_event() -> None:
     from openvibe.session.models import SessionCreatedEvent

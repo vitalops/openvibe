@@ -16,6 +16,9 @@ Session management
     PATCH  /session/{id}               update title
     GET    /session/{id}/messages      get all messages (with parts)
     POST   /session/{id}/message       send a message (SSE stream)
+    GET    /session/{id}/state         current state + pending permission info
+    POST   /session/{id}/abort         cancel an in-flight turn
+    POST   /session/{id}/resume        resume a session interrupted mid-tool
 
 Provider / model info
     GET    /provider                   list all providers
@@ -70,6 +73,14 @@ from openvibe.session.models import SessionInfo
 
 _state: AppState | None = None
 
+# Tracks in-flight turns: session_id → abort asyncio.Event.
+# Set when a turn starts, cleared when it ends.
+_active_aborts: dict[str, asyncio.Event] = {}
+
+# Tracks pending permission requests: session_id → permission info dict.
+# Populated from PermissionRequestedEvent bus events, cleared on reply/end.
+_pending_permissions: dict[str, dict] = {}
+
 
 def get_state() -> AppState:
     if _state is None:
@@ -107,6 +118,11 @@ class PermissionReplyRequest(BaseModel):
     tool: str | None = None
 
 
+class ResumeSessionRequest(BaseModel):
+    allow: bool
+    agent: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # App factory
 # ---------------------------------------------------------------------------
@@ -120,6 +136,8 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
         global _state
+        _active_aborts.clear()
+        _pending_permissions.clear()
         async with create_app_state(
             project_dir=project_dir,
             config=config,
@@ -226,29 +244,99 @@ def create_app(
         resolved_agent = agent_module.resolve(state.config, agent_name)
 
         abort = asyncio.Event()
+        coro = state.processor.run(session, resolved_agent, body.text, abort)
+        return EventSourceResponse(
+            _make_event_stream(coro, session_id, state, abort)
+        )
 
-        async def event_stream() -> AsyncGenerator[dict[str, Any], None]:
-            task = asyncio.create_task(
-                state.processor.run(session, resolved_agent, body.text, abort)
+    @app.get("/session/{session_id}/state")
+    async def get_session_state(session_id: str, state: State) -> dict[str, Any]:
+        """Return the current runtime state of a session.
+
+        States:
+        - ``idle``        — no active turn; ready to accept a message.
+        - ``thinking``    — a turn is running (LLM is responding or a tool is running).
+        - ``waiting``     — paused; a permission prompt is awaiting the user's reply.
+        - ``interrupted`` — the app was closed mid-tool; use POST /resume to continue.
+        """
+        from openvibe.session.models import ToolPart
+
+        session = session_store.get(state.db, session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        if session_id in _active_aborts:
+            current_state = "waiting" if session_id in _pending_permissions else "thinking"
+        else:
+            messages = session_store.list_messages(state.db, session_id)
+            interrupted = any(
+                isinstance(part, ToolPart) and part.state.call_id and part.state.output is None
+                for msg in messages
+                for part in msg.parts
             )
+            current_state = "interrupted" if interrupted else "idle"
 
-            async with state.bus.subscribe() as events:
-                async for event in events:
-                    if getattr(event, "session_id", None) == session_id:
-                        yield {
-                            "event": type(event).__name__,
-                            "data": _serialize_event(event),
-                        }
-                    if task.done():
-                        break
+        return {
+            "state": current_state,
+            "pending_permission": _pending_permissions.get(session_id),
+        }
 
-            # Ensure the task completes and surface any exception
-            try:
-                await task
-            except Exception as exc:
-                yield {"event": "error", "data": json.dumps({"message": str(exc)})}
+    @app.post("/session/{session_id}/abort")
+    async def abort_session(session_id: str, state: State) -> dict[str, str]:
+        """Cancel the in-flight turn for a session.
 
-        return EventSourceResponse(event_stream())
+        Sets the abort event so the processor exits at its next checkpoint.
+        Returns ``{"status": "ok"}`` if a turn was active, or
+        ``{"status": "no_active_turn"}`` if the session was already idle.
+        """
+        session = session_store.get(state.db, session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        abort = _active_aborts.get(session_id)
+        if abort:
+            abort.set()
+            return {"status": "ok"}
+        return {"status": "no_active_turn"}
+
+    @app.post("/session/{session_id}/resume")
+    async def resume_session(
+        session_id: str,
+        body: ResumeSessionRequest,
+        state: State,
+    ) -> EventSourceResponse:
+        """Resume a session that was interrupted mid-tool.
+
+        When the server (or TUI) is closed while a permission prompt is
+        pending, the ToolPart is saved with ``output=None``.  This endpoint
+        executes the interrupted tool (``allow=true``) or injects a denied
+        result (``allow=false``), then streams the LLM's final response.
+
+        Returns 400 if the session has no interrupted tool calls.
+        """
+        from openvibe.session.models import ToolPart
+
+        session = session_store.get(state.db, session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        messages = session_store.list_messages(state.db, session_id)
+        interrupted = any(
+            isinstance(part, ToolPart) and part.state.call_id and part.state.output is None
+            for msg in messages
+            for part in msg.parts
+        )
+        if not interrupted:
+            raise HTTPException(status_code=400, detail="Session has no interrupted tool calls")
+
+        agent_name = body.agent or state.config.default_agent
+        resolved_agent = agent_module.resolve(state.config, agent_name)
+
+        abort = asyncio.Event()
+        coro = state.processor.resume_interrupted(session, resolved_agent, body.allow, abort)
+        return EventSourceResponse(
+            _make_event_stream(coro, session_id, state, abort)
+        )
 
     # ------------------------------------------------------------------
     # Provider / model routes
@@ -361,6 +449,55 @@ def create_app(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+async def _make_event_stream(
+    coro: Any,
+    session_id: str,
+    state: AppState,
+    abort: asyncio.Event,
+) -> AsyncGenerator[dict[str, Any], None]:
+    """Run *coro* (a processor coroutine) and stream bus events as SSE.
+
+    Registers the abort event in ``_active_aborts`` for the duration of the
+    turn and updates ``_pending_permissions`` from ``PermissionRequestedEvent``
+    and ``PermissionRepliedEvent`` bus events.
+    """
+    from openvibe.permission.permission import PermissionRequestedEvent, PermissionRepliedEvent
+    from openvibe.session.models import TurnCompletedEvent
+
+    _active_aborts[session_id] = abort
+    try:
+        task = asyncio.create_task(coro)
+
+        async with state.bus.subscribe() as events:
+            async for event in events:
+                if getattr(event, "session_id", None) == session_id:
+                    # Keep permission state in sync.
+                    if isinstance(event, PermissionRequestedEvent):
+                        _pending_permissions[session_id] = {
+                            "request_id": event.request_id,
+                            "tool": event.tool,
+                            "description": event.description,
+                            "argument": event.argument,
+                        }
+                    elif isinstance(event, PermissionRepliedEvent):
+                        _pending_permissions.pop(session_id, None)
+
+                    yield {
+                        "event": type(event).__name__,
+                        "data": _serialize_event(event),
+                    }
+                if task.done():
+                    break
+
+        try:
+            await task
+        except Exception as exc:
+            yield {"event": "error", "data": json.dumps({"message": str(exc)})}
+    finally:
+        _active_aborts.pop(session_id, None)
+        _pending_permissions.pop(session_id, None)
+
 
 def _serialize_event(event: Any) -> str:
     """Convert a bus event dataclass to a JSON string."""
