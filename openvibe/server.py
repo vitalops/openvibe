@@ -46,9 +46,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Any, AsyncGenerator
+from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -57,14 +58,93 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from openvibe.agent import agent as agent_module
+from openvibe.bus import EventBus
 from openvibe.config import Config, PermissionAction, load_config
-from openvibe.core import AppState, create_app_state
 from openvibe.db import Database, create_database
 from openvibe.llm import LLMBackend, create_default_backend
+from openvibe.mcp.client import McpClientManager
+from openvibe.permission.permission import PermissionService
 from openvibe.project import project as project_module
 from openvibe.provider import provider as provider_module
 from openvibe.session import session as session_store
 from openvibe.session.models import SessionInfo
+from openvibe.session.processor import SessionProcessor
+from openvibe.tool.base import ToolRegistry, create_default_registry
+
+
+# ---------------------------------------------------------------------------
+# Application state
+# ---------------------------------------------------------------------------
+
+class AppState:
+    """All live objects that make up one running openvibe instance."""
+
+    def __init__(
+        self,
+        db: Database,
+        llm: LLMBackend,
+        bus: EventBus,
+        config: Config,
+        registry: ToolRegistry,
+        permissions: PermissionService,
+        mcp: McpClientManager,
+        project_dir: Path,
+    ) -> None:
+        self.db = db
+        self.llm = llm
+        self.bus = bus
+        self.config = config
+        self.registry = registry
+        self.permissions = permissions
+        self.mcp = mcp
+        self.project_dir = project_dir
+        self._processor = SessionProcessor(db, llm, bus, registry, permissions)
+
+    @property
+    def processor(self) -> SessionProcessor:
+        return self._processor
+
+
+@asynccontextmanager
+async def create_app_state(
+    project_dir: Path | None = None,
+    config: Config | None = None,
+    db: Database | None = None,
+    llm: LLMBackend | None = None,
+) -> AsyncGenerator[AppState, None]:
+    """Async context manager that yields a fully initialised ``AppState``."""
+    resolved_dir = project_dir or Path.cwd()
+    resolved_config = config or load_config(resolved_dir)
+    resolved_db = db or create_database()
+    resolved_llm = llm or create_default_backend()
+
+    bus = EventBus()
+    registry = create_default_registry()
+    permissions = PermissionService(resolved_db, bus)
+    mcp = McpClientManager()
+
+    project_module.get_or_create(resolved_db, resolved_dir)
+
+    mcp_tools = await mcp.connect_all(resolved_config.mcp)
+    for tool in mcp_tools:
+        registry.register(tool)
+
+    state = AppState(
+        db=resolved_db,
+        llm=resolved_llm,
+        bus=bus,
+        config=resolved_config,
+        registry=registry,
+        permissions=permissions,
+        mcp=mcp,
+        project_dir=resolved_dir,
+    )
+
+    try:
+        yield state
+    finally:
+        await mcp.close_all()
+        resolved_db.close()
 
 
 # ---------------------------------------------------------------------------
