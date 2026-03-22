@@ -125,6 +125,17 @@ class PermissionService:
             for r in rows
         ]
 
+    def clear_rules(self, project_id: str) -> int:
+        """Delete all stored rules for *project_id*.  Returns the count removed."""
+        rows = self._db.fetchall(
+            "SELECT id FROM permissions WHERE project_id = ?", (project_id,),
+        )
+        if rows:
+            self._db.execute(
+                "DELETE FROM permissions WHERE project_id = ?", (project_id,),
+            )
+        return len(rows)
+
     def save_rule(self, project_id: str, rule: Rule) -> None:
         now = datetime.now(timezone.utc).isoformat()
         self._db.execute(
@@ -229,18 +240,23 @@ class PermissionService:
         remember: bool = False,
         project_id: str | None = None,
         tool: str | None = None,
+        argument: str | None = None,
     ) -> None:
         """Respond to a pending ``ask``.
 
         If *remember* is True and *project_id* + *tool* are provided, the
-        decision is persisted as a project-level rule.
+        decision is persisted as a project-level rule scoped to the exact
+        *argument* (e.g. command string or file path).
         """
         future = self._pending.get(request_id)
         if future and not future.done():
             future.set_result(decision)
 
         if remember and decision == PermissionAction.ALLOW and project_id and tool:
-            self.save_rule(project_id, Rule(tool=tool, action=PermissionAction.ALLOW))
+            self.save_rule(
+                project_id,
+                Rule(tool=tool, action=PermissionAction.ALLOW, pattern=argument),
+            )
 
         asyncio.get_running_loop().create_task(
             self._bus.publish(

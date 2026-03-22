@@ -197,6 +197,7 @@ class PermissionReplyRequest(BaseModel):
     remember: bool = False
     project_id: str | None = None
     tool: str | None = None
+    argument: str | None = None
 
 
 class ResumeSessionRequest(BaseModel):
@@ -326,9 +327,36 @@ def create_app(
         state: State,
     ) -> EventSourceResponse:
         """Send a user message and stream the assistant response via SSE."""
+        from openvibe.commands import is_command, get_command, execute, CommandContext
+
         session = session_store.get(state.db, session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
+
+        # Slash commands are executed locally, never sent to the LLM.
+        # Build a minimal Session-like object for CommandContext since the
+        # server uses the raw processor rather than the Session class.
+        if is_command(body.text):
+            parsed = get_command(body.text)
+            if parsed:
+                name, args = parsed
+                _s = type(
+                    "_S", (),
+                    {
+                        "info": session,
+                        "_config": state.config,
+                        "_agent_name": state.config.default_agent,
+                        "_permissions": state.permissions,
+                    },
+                )()
+                result = execute(name, CommandContext(session=_s, args=args))
+
+                async def _command_stream():
+                    if result.output:
+                        yield {"event": "text_delta", "data": json.dumps({"content": result.output})}
+                    yield {"event": "done", "data": "{}"}
+
+                return EventSourceResponse(_command_stream())
 
         agent_name = body.agent or state.config.default_agent
         resolved_agent = agent_module.resolve(state.config, agent_name)
@@ -503,6 +531,7 @@ def create_app(
             remember=body.remember,
             project_id=body.project_id,
             tool=body.tool,
+            argument=body.argument,
         )
         return {"status": "ok"}
 

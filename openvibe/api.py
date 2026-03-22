@@ -112,6 +112,8 @@ class Response:
     * ``IDLE``    — turn finished; ``.text`` has the assistant's full reply.
     * ``WAITING`` — agent needs input; handle ``.request`` then call reply().
     * ``ERROR``   — something went wrong; inspect ``.error``.
+
+    If ``.command_result`` is set, this was a slash command (not an LLM turn).
     """
 
     state: SessionState
@@ -119,6 +121,7 @@ class Response:
     messages: list[Any] = field(default_factory=list)  # list[MessageInfo]
     request: InputRequest | None = None
     error: ErrorInfo | None = None
+    command_result: Any = None  # CommandResult when a slash command was executed
 
 
 class InvalidStateError(Exception):
@@ -208,6 +211,24 @@ class Session:
     # Blocking API
     # ------------------------------------------------------------------
 
+    def _try_command(self, text: str) -> Response | None:
+        """If *text* is a slash command, execute it and return a Response."""
+        from openvibe.commands import CommandContext, get_command, execute, is_command
+
+        if not is_command(text):
+            return None
+        parsed = get_command(text)
+        if parsed is None:
+            return None
+        name, args = parsed
+        ctx = CommandContext(session=self, args=args)
+        result = execute(name, ctx)
+        return Response(
+            state=SessionState.IDLE,
+            text=result.output,
+            command_result=result,
+        )
+
     def send(
         self,
         text: str,
@@ -222,9 +243,17 @@ class Session:
         * a permission request fires  → Response(state=WAITING)
         * an error occurs             → Response(state=ERROR)
 
+        Slash commands (``/help``, ``/cost``, etc.) are handled locally and
+        never reach the LLM.
+
         *on_message(msg_id, role)* — called when a new message is created.
         *on_tool(msg_id, part_index, state_dict)* — called on tool state changes.
         """
+        # Slash commands bypass the LLM entirely.
+        cmd_response = self._try_command(text)
+        if cmd_response is not None:
+            return cmd_response
+
         with self._lock:
             if self._state != SessionState.IDLE:
                 raise InvalidStateError(
@@ -274,7 +303,16 @@ class Session:
 
         *callback* is invoked (in a daemon thread) whenever the state
         changes to WAITING, IDLE, or ERROR.  If omitted, poll .state.
+
+        Slash commands are executed synchronously and delivered via *callback*
+        immediately.
         """
+        cmd_response = self._try_command(text)
+        if cmd_response is not None:
+            if callback:
+                callback(cmd_response)
+            return
+
         with self._lock:
             if self._state != SessionState.IDLE:
                 raise InvalidStateError(
@@ -913,6 +951,7 @@ async def _run_turn_async(
                             remember=remember,
                             project_id=session_info.project_id,
                             tool=event.tool,
+                            argument=event.argument,
                         )
 
                     elif isinstance(event, TurnCompletedEvent):
@@ -1121,6 +1160,7 @@ async def _run_interrupted_async(
                             remember=remember,
                             project_id=session_info.project_id,
                             tool=event.tool,
+                            argument=event.argument,
                         )
 
                     elif isinstance(event, TurnCompletedEvent):

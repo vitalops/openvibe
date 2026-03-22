@@ -219,6 +219,14 @@ class SessionScreen(Screen):
             await self._handle_permission_choice(event.text)
             return
 
+        # Slash commands — handled at the API level, but we intercept the
+        # result here to avoid freezing the UI / showing a spinner.
+        from openvibe.commands import is_command
+
+        if is_command(event.text):
+            await self._handle_command(event.text)
+            return
+
         input_bar = self.query_one(InputBar)
         input_bar.record_submission(event.text)
         input_bar.freeze()
@@ -229,6 +237,59 @@ class SessionScreen(Screen):
     @on(InputBar.HistoryNav)
     def handle_history_nav(self, event: InputBar.HistoryNav) -> None:
         self.query_one(InputBar).navigate_history(event.direction)
+
+    # ------------------------------------------------------------------
+    # Slash commands
+    # ------------------------------------------------------------------
+
+    async def _handle_command(self, text: str) -> None:
+        from openvibe.config import MessageRole
+        from openvibe.session import session as session_store
+        from openvibe.session.models import TextPart
+
+        input_bar = self.query_one(InputBar)
+        input_bar.record_submission(text)
+        msg_list = self.query_one(MessageList)
+
+        ov = self.app.ov  # type: ignore[attr-defined]
+        db = ov._db  # type: ignore[attr-defined]
+
+        # Persist and display the command as a user message.
+        user_msg = session_store.add_message(
+            db, self._session_id, MessageRole.USER, [TextPart(content=text)],
+        )
+        widget = await msg_list.add_message(user_msg.id, "user")
+        widget.append_text(text)
+
+        # Execute via the API layer.
+        session = self.app.get_session(self._session_id)  # type: ignore[attr-defined]
+        response = session.send(text)
+        result = response.command_result
+
+        if result is None:
+            return
+
+        # Handle special signals.
+        if result.quit:
+            self.app.exit()
+            return
+
+        if result.clear:
+            for child in list(msg_list.children):
+                child.remove()
+            msg_list._messages.clear()
+            return
+
+        # Persist and display the result as an assistant message.
+        if result.output:
+            reply_msg = session_store.add_message(
+                db, self._session_id, MessageRole.ASSISTANT,
+                [TextPart(content=result.output)],
+            )
+            result_widget = await msg_list.add_message(
+                reply_msg.id, str(MessageRole.ASSISTANT),
+            )
+            result_widget.append_text(result.output)
 
     # ------------------------------------------------------------------
     # Permission handling
