@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 # Session CRUD
 # ---------------------------------------------------------------------------
 
+
 def create(
     db: "Database",
     project_id: str,
@@ -76,7 +77,15 @@ def update_cost(
         "cost = cost + ?, input_tokens = input_tokens + ?, output_tokens = output_tokens + ?, "
         "cache_read_tokens = cache_read_tokens + ?, cache_write_tokens = cache_write_tokens + ?, "
         "updated_at = ? WHERE id = ?",
-        (cost, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, now_iso(), session_id),
+        (
+            cost,
+            input_tokens,
+            output_tokens,
+            cache_read_tokens,
+            cache_write_tokens,
+            now_iso(),
+            session_id,
+        ),
     )
 
 
@@ -101,7 +110,9 @@ def fork(
     if not original:
         raise ValueError(f"Session {session_id} not found")
 
-    new_session = create(db, original.project_id, original.directory, parent_id=session_id)
+    new_session = create(
+        db, original.project_id, original.directory, parent_id=session_id
+    )
 
     messages = list_messages(db, session_id)
     for msg in messages:
@@ -115,6 +126,7 @@ def fork(
 # ---------------------------------------------------------------------------
 # Message CRUD
 # ---------------------------------------------------------------------------
+
 
 def add_message(
     db: "Database",
@@ -135,7 +147,9 @@ def add_message(
         "INSERT INTO messages (id, session_id, role, position, created_at) VALUES (?,?,?,?,?)",
         (msg_id, session_id, role, position, now),
     )
-    msg = MessageInfo(id=msg_id, session_id=session_id, role=role, position=position, created_at=now)
+    msg = MessageInfo(
+        id=msg_id, session_id=session_id, role=role, position=position, created_at=now
+    )
 
     if parts:
         for i, part in enumerate(parts):
@@ -172,7 +186,10 @@ def copy_message(db: "Database", msg: MessageInfo, new_session_id: str) -> Messa
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _upsert_part(db: "Database", message_id: str, index: int, part: MessagePart) -> None:
+
+def _upsert_part(
+    db: "Database", message_id: str, index: int, part: MessagePart
+) -> None:
     part_id = f"part_{message_id}_{index}"
     db.execute(
         "INSERT OR REPLACE INTO parts (id, message_id, type, position, data) VALUES (?,?,?,?,?)",

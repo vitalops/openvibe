@@ -36,10 +36,16 @@ class ReadTool(Tool):
         )
 
         if not path.exists():
-            return ToolResult(title=f"Read {params.path}", output=f"File not found: {path}", error=True)
+            return ToolResult(
+                title=f"Read {params.path}",
+                output=f"File not found: {path}",
+                error=True,
+            )
 
         if not path.is_file():
-            return ToolResult(title=f"Read {params.path}", output=f"Not a file: {path}", error=True)
+            return ToolResult(
+                title=f"Read {params.path}", output=f"Not a file: {path}", error=True
+            )
 
         try:
             lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -51,7 +57,9 @@ class ReadTool(Tool):
         selected = lines[start:end]
 
         # Format with line numbers (matches the Read tool convention in the TS version)
-        numbered = "\n".join(f"{start + i + 1:>6}\t{line}" for i, line in enumerate(selected))
+        numbered = "\n".join(
+            f"{start + i + 1:>6}\t{line}" for i, line in enumerate(selected)
+        )
 
         return ToolResult(
             title=f"Read {params.path}",

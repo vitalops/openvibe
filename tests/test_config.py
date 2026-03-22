@@ -16,10 +16,10 @@ from openvibe.config import (
     load_config,
 )
 
-
 # ---------------------------------------------------------------------------
 # _deep_merge
 # ---------------------------------------------------------------------------
+
 
 def test_deep_merge_scalars_overlay_wins():
     result = _deep_merge({"a": 1}, {"a": 2})
@@ -33,16 +33,16 @@ def test_deep_merge_new_key_added():
 
 
 def test_deep_merge_dicts_are_recursive():
-    base    = {"x": {"a": 1, "b": 2}}
+    base = {"x": {"a": 1, "b": 2}}
     overlay = {"x": {"b": 99, "c": 3}}
-    result  = _deep_merge(base, overlay)
+    result = _deep_merge(base, overlay)
     assert result["x"] == {"a": 1, "b": 99, "c": 3}
 
 
 def test_deep_merge_lists_are_concatenated():
-    base    = {"instructions": ["first"]}
+    base = {"instructions": ["first"]}
     overlay = {"instructions": ["second"]}
-    result  = _deep_merge(base, overlay)
+    result = _deep_merge(base, overlay)
     assert result["instructions"] == ["first", "second"]
 
 
@@ -69,15 +69,16 @@ def test_deep_merge_type_mismatch_overlay_wins():
 
 def test_deep_merge_deeply_nested():
     """Three levels of dict nesting must all merge correctly."""
-    base    = {"a": {"b": {"c": 1, "d": 2}}}
+    base = {"a": {"b": {"c": 1, "d": 2}}}
     overlay = {"a": {"b": {"d": 99, "e": 3}}}
-    result  = _deep_merge(base, overlay)
+    result = _deep_merge(base, overlay)
     assert result["a"]["b"] == {"c": 1, "d": 99, "e": 3}
 
 
 # ---------------------------------------------------------------------------
 # _expand_env
 # ---------------------------------------------------------------------------
+
 
 def test_expand_env_replaces_known_var(monkeypatch):
     monkeypatch.setenv("MY_KEY", "secret")
@@ -109,6 +110,7 @@ def test_expand_env_non_string_unchanged():
 # ---------------------------------------------------------------------------
 # load_config — project file
 # ---------------------------------------------------------------------------
+
 
 def test_load_config_empty_dir_returns_defaults(tmp_path):
     cfg = load_config(tmp_path)
@@ -159,6 +161,7 @@ def test_load_config_instructions_concatenated(tmp_path):
 # ---------------------------------------------------------------------------
 # load_config — env var overrides
 # ---------------------------------------------------------------------------
+
 
 def test_load_config_env_content_override(tmp_path, monkeypatch):
     monkeypatch.setenv(

@@ -30,9 +30,11 @@ if TYPE_CHECKING:
 # Agent runtime info
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class AgentInfo:
     """Fully resolved agent configuration used at runtime."""
+
     name: str
     description: str
     system_prompt: str
@@ -89,38 +91,38 @@ _A = PermissionAction  # local alias for brevity
 
 _BUILD_RULES: list[Rule] = [
     # Allow common read tools by default
-    Rule(tool="read",       action=_A.ALLOW),
-    Rule(tool="glob",       action=_A.ALLOW),
-    Rule(tool="grep",       action=_A.ALLOW),
-    Rule(tool="web_fetch",  action=_A.ALLOW),
-    Rule(tool="todo_read",  action=_A.ALLOW),
+    Rule(tool="read", action=_A.ALLOW),
+    Rule(tool="glob", action=_A.ALLOW),
+    Rule(tool="grep", action=_A.ALLOW),
+    Rule(tool="web_fetch", action=_A.ALLOW),
+    Rule(tool="todo_read", action=_A.ALLOW),
     Rule(tool="todo_write", action=_A.ALLOW),
     # Ask before write operations
     Rule(tool="write", action=_A.ASK),
-    Rule(tool="edit",  action=_A.ASK),
-    Rule(tool="bash",  action=_A.ASK),
+    Rule(tool="edit", action=_A.ASK),
+    Rule(tool="bash", action=_A.ASK),
 ]
 
 _PLAN_RULES: list[Rule] = [
-    Rule(tool="read",      action=_A.ALLOW),
-    Rule(tool="glob",      action=_A.ALLOW),
-    Rule(tool="grep",      action=_A.ALLOW),
+    Rule(tool="read", action=_A.ALLOW),
+    Rule(tool="glob", action=_A.ALLOW),
+    Rule(tool="grep", action=_A.ALLOW),
     Rule(tool="web_fetch", action=_A.ALLOW),
     # Deny all write / execute operations
-    Rule(tool="write",      action=_A.DENY),
-    Rule(tool="edit",       action=_A.DENY),
-    Rule(tool="bash",       action=_A.DENY),
+    Rule(tool="write", action=_A.DENY),
+    Rule(tool="edit", action=_A.DENY),
+    Rule(tool="bash", action=_A.DENY),
     Rule(tool="todo_write", action=_A.DENY),
 ]
 
 _GENERAL_RULES: list[Rule] = [
-    Rule(tool="read",      action=_A.ALLOW),
-    Rule(tool="glob",      action=_A.ALLOW),
-    Rule(tool="grep",      action=_A.ALLOW),
+    Rule(tool="read", action=_A.ALLOW),
+    Rule(tool="glob", action=_A.ALLOW),
+    Rule(tool="grep", action=_A.ALLOW),
     Rule(tool="web_fetch", action=_A.ALLOW),
     Rule(tool="write", action=_A.DENY),
-    Rule(tool="edit",  action=_A.DENY),
-    Rule(tool="bash",  action=_A.DENY),
+    Rule(tool="edit", action=_A.DENY),
+    Rule(tool="bash", action=_A.DENY),
 ]
 
 
@@ -158,6 +160,7 @@ _BUILTIN_AGENTS: dict[str, AgentInfo] = {
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def resolve(config: "Config", name: str | None = None) -> AgentInfo:
     """Return a fully resolved AgentInfo for *name* (or the default agent).
@@ -197,6 +200,7 @@ def list_agents(config: "Config") -> list[AgentInfo]:
 def _apply_config(base: AgentInfo, cfg: AgentConfig) -> AgentInfo:
     """Return a copy of *base* with *cfg* overrides applied."""
     import dataclasses
+
     updates: dict[str, object] = {}
 
     if cfg.model:

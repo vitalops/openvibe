@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 @dataclass
 class ProjectInfo:
     id: str
-    path: str        # absolute path to the project root
+    path: str  # absolute path to the project root
     created_at: str
     updated_at: str
 
@@ -80,6 +80,7 @@ def is_inside_project(project: ProjectInfo, path: Path) -> bool:
 # ---------------------------------------------------------------------------
 # Git helpers
 # ---------------------------------------------------------------------------
+
 
 def git_diff(directory: str) -> str | None:
     """Return ``git diff HEAD`` output, or None if not a git repo / no diff."""

@@ -39,10 +39,10 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-
 # ---------------------------------------------------------------------------
 # Event types
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class TextDelta:
@@ -84,12 +84,20 @@ class StreamDone:
     cache_write_tokens: int = 0
 
 
-LLMEvent = TextDelta | ReasoningDelta | ToolCallBegin | ToolCallDelta | ToolCallComplete | StreamDone
+LLMEvent = (
+    TextDelta
+    | ReasoningDelta
+    | ToolCallBegin
+    | ToolCallDelta
+    | ToolCallComplete
+    | StreamDone
+)
 
 
 # ---------------------------------------------------------------------------
 # Input types
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class ToolDefinition:
@@ -101,10 +109,11 @@ class ToolDefinition:
 @dataclass
 class ContentBlock:
     """One content item within a message (text, image, tool result…)."""
-    type: str                         # "text" | "tool_result" | "image_url"
+
+    type: str  # "text" | "tool_result" | "image_url"
     text: str | None = None
-    tool_call_id: str | None = None   # for tool_result
-    content: str | None = None        # body of a tool_result
+    tool_call_id: str | None = None  # for tool_result
+    content: str | None = None  # body of a tool_result
     image_url: dict[str, Any] | None = None  # {"url": "data:image/…"}
 
 
@@ -113,13 +122,14 @@ class Message:
     role: str  # "user" | "assistant" | "system" | "tool"
     content: str | list[ContentBlock]
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
-    tool_call_id: str | None = None   # only for role="tool"
+    tool_call_id: str | None = None  # only for role="tool"
     name: str | None = None
 
 
 # ---------------------------------------------------------------------------
 # Protocol
 # ---------------------------------------------------------------------------
+
 
 class LLMBackend(Protocol):
     """Protocol for LLM backends.
@@ -138,13 +148,13 @@ class LLMBackend(Protocol):
         top_p: float | None = None,
         max_tokens: int | None = None,
         **kwargs: Any,
-    ) -> AsyncIterator[LLMEvent]:
-        ...
+    ) -> AsyncIterator[LLMEvent]: ...
 
 
 # ---------------------------------------------------------------------------
 # litellm backend
 # ---------------------------------------------------------------------------
+
 
 def _to_litellm_messages(messages: list[Message]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
@@ -158,13 +168,17 @@ def _to_litellm_messages(messages: list[Message]) -> list[dict[str, Any]]:
                     case "text":
                         parts.append({"type": "text", "text": block.text or ""})
                     case "tool_result":
-                        parts.append({
-                            "type": "tool_result",
-                            "tool_use_id": block.tool_call_id,
-                            "content": block.content or "",
-                        })
+                        parts.append(
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": block.tool_call_id,
+                                "content": block.content or "",
+                            }
+                        )
                     case "image_url":
-                        parts.append({"type": "image_url", "image_url": block.image_url})
+                        parts.append(
+                            {"type": "image_url", "image_url": block.image_url}
+                        )
             d = {"role": msg.role, "content": parts}
 
         if msg.tool_calls:
@@ -233,7 +247,9 @@ class LiteLLMBackend:
         # Accumulate streaming tool calls by index
         pending: dict[int, dict[str, Any]] = {}
 
-        response = await litellm.acompletion(model=model, messages=ll_messages, **call_kwargs)
+        response = await litellm.acompletion(
+            model=model, messages=ll_messages, **call_kwargs
+        )
 
         async for chunk in response:
             choice = chunk.choices[0]
@@ -257,7 +273,9 @@ class LiteLLMBackend:
                             pending[idx]["name"] = tc.function.name
                         if tc.function.arguments:
                             pending[idx]["args"] += tc.function.arguments
-                            yield ToolCallDelta(index=idx, args_delta=tc.function.arguments)
+                            yield ToolCallDelta(
+                                index=idx, args_delta=tc.function.arguments
+                            )
                     if tc.id and tc.id != pending[idx]["id"]:
                         pending[idx]["id"] = tc.id
 
@@ -270,7 +288,11 @@ class LiteLLMBackend:
                         arguments=state["args"],
                     )
                 raw_usage = getattr(chunk, "usage", None)
-                usage: dict[str, Any] = vars(raw_usage) if raw_usage and hasattr(raw_usage, "__dict__") else {}
+                usage: dict[str, Any] = (
+                    vars(raw_usage)
+                    if raw_usage and hasattr(raw_usage, "__dict__")
+                    else {}
+                )
                 yield StreamDone(
                     stop_reason=choice.finish_reason,
                     input_tokens=usage.get("prompt_tokens", 0),

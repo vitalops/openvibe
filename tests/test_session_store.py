@@ -10,10 +10,10 @@ from openvibe.project import project as _project_module
 from openvibe.session import session as _store
 from openvibe.session.models import TextPart
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def db(tmp_path):
@@ -39,6 +39,7 @@ def _make_session(db, project, title=None):
 # ---------------------------------------------------------------------------
 # Basic CRUD
 # ---------------------------------------------------------------------------
+
 
 def test_create_returns_session_info(db, project):
     info = _make_session(db, project)
@@ -78,6 +79,7 @@ def test_delete_removes_session(db, project):
 # archive() vs delete()
 # ---------------------------------------------------------------------------
 
+
 def test_archive_hides_from_listing(db, project):
     s = _make_session(db, project)
     _store.archive(db, s.id)
@@ -97,6 +99,7 @@ def test_archive_session_still_retrievable_by_id(db, project):
 # update_title / update_cost
 # ---------------------------------------------------------------------------
 
+
 def test_update_title(db, project):
     s = _make_session(db, project, title="old")
     _store.update_title(db, s.id, "new title")
@@ -109,13 +112,14 @@ def test_update_cost_accumulates(db, project):
     _store.update_cost(db, s.id, cost=0.02, input_tokens=200, output_tokens=80)
     updated = _store.get(db, s.id)
     assert abs(updated.cost - 0.03) < 1e-6
-    assert updated.input_tokens  == 300
+    assert updated.input_tokens == 300
     assert updated.output_tokens == 130
 
 
 # ---------------------------------------------------------------------------
 # Message CRUD
 # ---------------------------------------------------------------------------
+
 
 def test_add_and_list_messages(db, project):
     s = _make_session(db, project)
@@ -149,6 +153,7 @@ def test_upsert_part_updates_existing(db, project):
 # ---------------------------------------------------------------------------
 # fork()
 # ---------------------------------------------------------------------------
+
 
 def test_fork_creates_new_session(db, project):
     original = _make_session(db, project)
@@ -187,7 +192,9 @@ def test_fork_middle_truncation(db, project):
     """Forking up to message 2 of 3 copies exactly the first message."""
     original = _make_session(db, project)
     m1 = _store.add_message(db, original.id, MessageRole.USER, [TextPart(content="q1")])
-    m2 = _store.add_message(db, original.id, MessageRole.ASSISTANT, [TextPart(content="a1")])
+    m2 = _store.add_message(
+        db, original.id, MessageRole.ASSISTANT, [TextPart(content="a1")]
+    )
     _store.add_message(db, original.id, MessageRole.USER, [TextPart(content="q2")])
 
     # Fork up to (not including) m2 — should copy only m1
@@ -200,7 +207,9 @@ def test_fork_middle_truncation(db, project):
 def test_fork_copies_part_content(db, project):
     """Forked messages must preserve part content, not just count."""
     original = _make_session(db, project)
-    _store.add_message(db, original.id, MessageRole.USER, [TextPart(content="exact text")])
+    _store.add_message(
+        db, original.id, MessageRole.USER, [TextPart(content="exact text")]
+    )
 
     forked = _store.fork(db, original.id)
     msgs = _store.list_messages(db, forked.id)
@@ -210,6 +219,7 @@ def test_fork_copies_part_content(db, project):
 # ---------------------------------------------------------------------------
 # add_message edge cases
 # ---------------------------------------------------------------------------
+
 
 def test_add_message_without_parts(db, project):
     """add_message with no parts should succeed and produce an empty parts list."""
@@ -224,19 +234,30 @@ def test_add_message_without_parts(db, project):
 # update_cost cache tokens
 # ---------------------------------------------------------------------------
 
+
 def test_update_cost_cache_tokens_accumulate(db, project):
     """cache_read_tokens and cache_write_tokens must accumulate correctly."""
     s = _make_session(db, project)
     _store.update_cost(
-        db, s.id, cost=0.0, input_tokens=0, output_tokens=0,
-        cache_read_tokens=10, cache_write_tokens=5,
+        db,
+        s.id,
+        cost=0.0,
+        input_tokens=0,
+        output_tokens=0,
+        cache_read_tokens=10,
+        cache_write_tokens=5,
     )
     _store.update_cost(
-        db, s.id, cost=0.0, input_tokens=0, output_tokens=0,
-        cache_read_tokens=20, cache_write_tokens=8,
+        db,
+        s.id,
+        cost=0.0,
+        input_tokens=0,
+        output_tokens=0,
+        cache_read_tokens=20,
+        cache_write_tokens=8,
     )
     updated = _store.get(db, s.id)
-    assert updated.cache_read_tokens  == 30
+    assert updated.cache_read_tokens == 30
     assert updated.cache_write_tokens == 13
 
 
@@ -244,9 +265,11 @@ def test_update_cost_cache_tokens_accumulate(db, project):
 # list_sessions ordering
 # ---------------------------------------------------------------------------
 
+
 def test_list_sessions_ordered_by_updated_at_desc(db, project):
     """Most recently updated session should appear first."""
     import time as _time
+
     s1 = _make_session(db, project, title="first")
     _time.sleep(0.01)  # ensure different timestamps
     s2 = _make_session(db, project, title="second")

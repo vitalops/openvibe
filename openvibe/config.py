@@ -26,76 +26,82 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
 # ---------------------------------------------------------------------------
 # Enums — defined here so every module imports from one place
 # ---------------------------------------------------------------------------
 
+
 class AgentMode(StrEnum):
-    PRIMARY  = "primary"
+    PRIMARY = "primary"
     SUBAGENT = "subagent"
 
 
 class PermissionAction(StrEnum):
     ALLOW = "allow"
-    DENY  = "deny"
-    ASK   = "ask"
+    DENY = "deny"
+    ASK = "ask"
 
 
 class MessageRole(StrEnum):
-    USER       = "user"
-    ASSISTANT  = "assistant"
-    SYSTEM     = "system"
-    ERROR      = "error"
+    USER = "user"
+    ASSISTANT = "assistant"
+    SYSTEM = "system"
+    ERROR = "error"
     PERMISSION = "permission"
 
 
 class ToolStateStatus(StrEnum):
-    PENDING   = "pending"
-    RUNNING   = "running"
+    PENDING = "pending"
+    RUNNING = "running"
     COMPLETED = "completed"
-    ERROR     = "error"
+    ERROR = "error"
 
 
 # ---------------------------------------------------------------------------
 # Sub-models
 # ---------------------------------------------------------------------------
 
+
 class ModelRef(BaseModel):
     """Reference to a specific model on a specific provider."""
+
     provider_id: str
     model_id: str
 
 
 class ProviderConfig(BaseModel):
     """Per-provider overrides (api_key, base_url, api_version, custom options)."""
+
     api_key: str | None = None
     base_url: str | None = None
-    api_version: str | None = None   # e.g. "2024-02-01" for Azure OpenAI
+    api_version: str | None = None  # e.g. "2024-02-01" for Azure OpenAI
     # Arbitrary provider-specific options forwarded to litellm
     options: dict[str, Any] = Field(default_factory=dict)
 
 
 class AgentConfig(BaseModel):
     """Definition for a named agent (built-in or user-defined)."""
+
     model: ModelRef | None = None
     description: str = ""
-    prompt: str | None = None          # additional system prompt fragment
+    prompt: str | None = None  # additional system prompt fragment
     temperature: float | None = None
     top_p: float | None = None
-    max_steps: int | None = None       # hard cap on tool-call iterations
+    max_steps: int | None = None  # hard cap on tool-call iterations
     mode: AgentMode = AgentMode.PRIMARY
 
 
 class PermissionRule(BaseModel):
     """A single permission rule evaluated against a tool call."""
-    tool: str                          # tool name or glob (e.g. "bash", "file.*")
+
+    tool: str  # tool name or glob (e.g. "bash", "file.*")
     action: PermissionAction
-    pattern: str | None = None         # optional path / argument pattern
+    pattern: str | None = None  # optional path / argument pattern
 
 
 class McpServerConfig(BaseModel):
     """Configuration for an MCP server connection."""
+
     type: Literal["stdio", "sse"] = "stdio"
     # stdio transport
     command: str | None = None
@@ -125,6 +131,7 @@ class Config(BaseModel):
           ]
         }
     """
+
     # Default model used when no agent-specific model is set
     model: ModelRef | None = None
     # Provider overrides keyed by provider_id
@@ -164,6 +171,7 @@ def _expand_env(value: Any) -> Any:
 # Deep merge
 # ---------------------------------------------------------------------------
 
+
 def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
     """Merge *overlay* into a copy of *base*.
 
@@ -188,6 +196,7 @@ def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]
 # ---------------------------------------------------------------------------
 # Loading
 # ---------------------------------------------------------------------------
+
 
 def _load_json(path: Path) -> dict[str, Any]:
     """Load a JSON (or JSONC — JSON with // comments) file."""
@@ -252,13 +261,13 @@ def load_config(project_dir: Path | None = None) -> Config:
 # Env var names used by litellm for each provider field.
 # provider_id → (api_key_var, base_url_var, api_version_var)
 _PROVIDER_ENV: dict[str, tuple[str | None, str | None, str | None]] = {
-    "anthropic":  ("ANTHROPIC_API_KEY",  None,             None),
-    "openai":     ("OPENAI_API_KEY",     "OPENAI_API_BASE", None),
-    "google":     ("GEMINI_API_KEY",     None,             None),
-    "groq":       ("GROQ_API_KEY",       None,             None),
-    "mistral":    ("MISTRAL_API_KEY",    None,             None),
-    "openrouter": ("OPENROUTER_API_KEY", None,             None),
-    "azure":      ("AZURE_API_KEY",      "AZURE_API_BASE", "AZURE_API_VERSION"),
+    "anthropic": ("ANTHROPIC_API_KEY", None, None),
+    "openai": ("OPENAI_API_KEY", "OPENAI_API_BASE", None),
+    "google": ("GEMINI_API_KEY", None, None),
+    "groq": ("GROQ_API_KEY", None, None),
+    "mistral": ("MISTRAL_API_KEY", None, None),
+    "openrouter": ("OPENROUTER_API_KEY", None, None),
+    "azure": ("AZURE_API_KEY", "AZURE_API_BASE", "AZURE_API_VERSION"),
 }
 
 

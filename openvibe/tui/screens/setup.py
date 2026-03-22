@@ -29,7 +29,6 @@ from textual.widgets import (
 
 from openvibe.provider.provider import PROVIDERS, ProviderInfo
 
-
 _GLOBAL_CONFIG = Path.home() / ".config" / "openvibe" / "openvibe.json"
 _CUSTOM_MODEL_ID = "__custom__"
 
@@ -160,10 +159,12 @@ class SetupWizardScreen(Screen[None]):
 
     def __init__(self) -> None:
         self._provider: ProviderInfo | None = None
-        self._model_id: str | None = None   # litellm model string e.g. "anthropic/claude-sonnet-4-5"
+        self._model_id: str | None = (
+            None  # litellm model string e.g. "anthropic/claude-sonnet-4-5"
+        )
         self._api_key: str = ""
-        self._base_url: str = ""            # Azure endpoint URL (required for azure provider)
-        self._api_version: str = ""         # Azure API version e.g. "2024-02-01"
+        self._base_url: str = ""  # Azure endpoint URL (required for azure provider)
+        self._api_version: str = ""  # Azure API version e.g. "2024-02-01"
         self._step = 0
         # Maps safe widget ID → original litellm model string (slashes are invalid in IDs)
         self._model_id_map: dict[str, str] = {}
@@ -180,75 +181,81 @@ class SetupWizardScreen(Screen[None]):
                 yield Static("", id="step-label")
 
                 with VerticalScroll(id="step-scroll"):
-                  with ContentSwitcher(initial="provider"):
+                    with ContentSwitcher(initial="provider"):
 
-                    # ── Step 1: Provider ──────────────────────────────
-                    with Vertical(id="provider"):
-                        yield Static("Choose a provider", classes="step-heading")
-                        with RadioSet(id="provider-radio"):
-                            for p in PROVIDERS:
-                                yield RadioButton(p.name, id=f"p-{p.id}")
+                        # ── Step 1: Provider ──────────────────────────────
+                        with Vertical(id="provider"):
+                            yield Static("Choose a provider", classes="step-heading")
+                            with RadioSet(id="provider-radio"):
+                                for p in PROVIDERS:
+                                    yield RadioButton(p.name, id=f"p-{p.id}")
 
-                    # ── Step 2: Model ─────────────────────────────────
-                    with Vertical(id="model"):
-                        yield Static("Choose a model", classes="step-heading")
-                        yield Static("", id="model-hint", classes="hint")
-                        yield ListView(id="model-list")
-                        with Horizontal(id="custom-model-row"):
-                            yield Static("Model string:", id="custom-model-label")
+                        # ── Step 2: Model ─────────────────────────────────
+                        with Vertical(id="model"):
+                            yield Static("Choose a model", classes="step-heading")
+                            yield Static("", id="model-hint", classes="hint")
+                            yield ListView(id="model-list")
+                            with Horizontal(id="custom-model-row"):
+                                yield Static("Model string:", id="custom-model-label")
+                                yield Input(
+                                    placeholder="e.g. my-gpt4o-deployment",
+                                    id="custom-model-input",
+                                )
+
+                        # ── Step 3: API key ───────────────────────────────
+                        with Vertical(id="apikey"):
+                            yield Static("API key (optional)", classes="step-heading")
+                            yield Static("", id="apikey-provider-hint", classes="hint")
                             yield Input(
-                                placeholder="e.g. my-gpt4o-deployment",
-                                id="custom-model-input",
+                                placeholder="sk-…", password=True, id="apikey-input"
+                            )
+                            yield Static("", id="apikey-env-hint", classes="hint")
+                            # Azure-only: endpoint URL
+                            yield Static(
+                                "Azure endpoint URL [bold](required)[/bold]",
+                                id="azure-url-label",
+                                classes="hint",
+                            )
+                            yield Input(
+                                placeholder="https://<resource>.openai.azure.com/",
+                                id="azure-url-input",
+                            )
+                            yield Static(
+                                "API version [bold](required)[/bold]",
+                                id="azure-version-label",
+                                classes="hint",
+                            )
+                            yield Input(
+                                placeholder="e.g. 2024-02-01",
+                                id="azure-version-input",
                             )
 
-                    # ── Step 3: API key ───────────────────────────────
-                    with Vertical(id="apikey"):
-                        yield Static("API key (optional)", classes="step-heading")
-                        yield Static("", id="apikey-provider-hint", classes="hint")
-                        yield Input(placeholder="sk-…", password=True, id="apikey-input")
-                        yield Static("", id="apikey-env-hint", classes="hint")
-                        # Azure-only: endpoint URL
-                        yield Static(
-                            "Azure endpoint URL [bold](required)[/bold]",
-                            id="azure-url-label",
-                            classes="hint",
-                        )
-                        yield Input(
-                            placeholder="https://<resource>.openai.azure.com/",
-                            id="azure-url-input",
-                        )
-                        yield Static(
-                            "API version [bold](required)[/bold]",
-                            id="azure-version-label",
-                            classes="hint",
-                        )
-                        yield Input(
-                            placeholder="e.g. 2024-02-01",
-                            id="azure-version-input",
-                        )
-
-                    # ── Step 4: Confirm ───────────────────────────────
-                    with Vertical(id="confirm"):
-                        yield Static("Ready to save", classes="step-heading")
-                        with Horizontal(classes="confirm-row"):
-                            yield Static("Provider:", classes="confirm-key")
-                            yield Static("", id="conf-provider", classes="confirm-val")
-                        with Horizontal(classes="confirm-row"):
-                            yield Static("Model:", classes="confirm-key")
-                            yield Static("", id="conf-model", classes="confirm-val")
-                        with Horizontal(classes="confirm-row"):
-                            yield Static("API key:", classes="confirm-key")
-                            yield Static("", id="conf-apikey", classes="confirm-val")
-                        with Horizontal(classes="confirm-row", id="conf-url-row"):
-                            yield Static("Endpoint:", classes="confirm-key")
-                            yield Static("", id="conf-url", classes="confirm-val")
-                        with Horizontal(classes="confirm-row", id="conf-ver-row"):
-                            yield Static("API version:", classes="confirm-key")
-                            yield Static("", id="conf-ver", classes="confirm-val")
-                        yield Static(
-                            f"\nWill save to: [dim]{_GLOBAL_CONFIG}[/dim]",
-                            id="confirm-path",
-                        )
+                        # ── Step 4: Confirm ───────────────────────────────
+                        with Vertical(id="confirm"):
+                            yield Static("Ready to save", classes="step-heading")
+                            with Horizontal(classes="confirm-row"):
+                                yield Static("Provider:", classes="confirm-key")
+                                yield Static(
+                                    "", id="conf-provider", classes="confirm-val"
+                                )
+                            with Horizontal(classes="confirm-row"):
+                                yield Static("Model:", classes="confirm-key")
+                                yield Static("", id="conf-model", classes="confirm-val")
+                            with Horizontal(classes="confirm-row"):
+                                yield Static("API key:", classes="confirm-key")
+                                yield Static(
+                                    "", id="conf-apikey", classes="confirm-val"
+                                )
+                            with Horizontal(classes="confirm-row", id="conf-url-row"):
+                                yield Static("Endpoint:", classes="confirm-key")
+                                yield Static("", id="conf-url", classes="confirm-val")
+                            with Horizontal(classes="confirm-row", id="conf-ver-row"):
+                                yield Static("API version:", classes="confirm-key")
+                                yield Static("", id="conf-ver", classes="confirm-val")
+                            yield Static(
+                                f"\nWill save to: [dim]{_GLOBAL_CONFIG}[/dim]",
+                                id="confirm-path",
+                            )
 
                 with Horizontal(id="nav"):
                     yield Button("Back", id="back", variant="default", disabled=True)
@@ -323,7 +330,9 @@ class SetupWizardScreen(Screen[None]):
         elif step == "apikey":
             self._api_key = self.query_one("#apikey-input", Input).value.strip()
             self._base_url = self.query_one("#azure-url-input", Input).value.strip()
-            self._api_version = self.query_one("#azure-version-input", Input).value.strip()
+            self._api_version = self.query_one(
+                "#azure-version-input", Input
+            ).value.strip()
             self._populate_confirm()
 
         elif step == "confirm":
@@ -369,17 +378,23 @@ class SetupWizardScreen(Screen[None]):
                 "[dim]These are common deployment names. Use the custom option "
                 "if your deployment has a different name.[/dim]"
             )
-            self.query_one("#custom-model-input", Input).placeholder = "e.g. my-gpt4o-deployment"
+            self.query_one("#custom-model-input", Input).placeholder = (
+                "e.g. my-gpt4o-deployment"
+            )
         else:
             hint.update("")
-            self.query_one("#custom-model-input", Input).placeholder = "e.g. anthropic/claude-opus-4-6"
+            self.query_one("#custom-model-input", Input).placeholder = (
+                "e.g. anthropic/claude-opus-4-6"
+            )
         if self._provider:
             for m in self._provider.models:
                 # Widget IDs must be valid CSS identifiers — slashes are not allowed.
                 safe_id = m.id.replace("/", "--")
                 self._model_id_map[safe_id] = m.id
                 lv.append(ListItem(Label(m.name), id=safe_id))
-        lv.append(ListItem(Label("[dim]Custom model string…[/dim]"), id=_CUSTOM_MODEL_ID))
+        lv.append(
+            ListItem(Label("[dim]Custom model string…[/dim]"), id=_CUSTOM_MODEL_ID)
+        )
 
     def _populate_apikey_hints(self) -> None:
         p = self._provider
@@ -396,8 +411,12 @@ class SetupWizardScreen(Screen[None]):
         else:
             self.query_one("#apikey-env-hint", Static).update("")
         # Show/hide Azure-specific endpoint and version fields
-        for wid in ("#azure-url-label", "#azure-url-input",
-                    "#azure-version-label", "#azure-version-input"):
+        for wid in (
+            "#azure-url-label",
+            "#azure-url-input",
+            "#azure-version-label",
+            "#azure-version-input",
+        ):
             self.query_one(wid).display = is_azure
 
     def _populate_confirm(self) -> None:
@@ -416,8 +435,12 @@ class SetupWizardScreen(Screen[None]):
         for row_id in ("#conf-url-row", "#conf-ver-row"):
             self.query_one(row_id).display = bool(is_azure)
         if is_azure:
-            self.query_one("#conf-url", Static).update(self._base_url or "[dim]not set[/dim]")
-            self.query_one("#conf-ver", Static).update(self._api_version or "[dim]not set[/dim]")
+            self.query_one("#conf-url", Static).update(
+                self._base_url or "[dim]not set[/dim]"
+            )
+            self.query_one("#conf-ver", Static).update(
+                self._api_version or "[dim]not set[/dim]"
+            )
 
     # ------------------------------------------------------------------
     # Save

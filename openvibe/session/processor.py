@@ -77,6 +77,7 @@ DOOM_LOOP_THRESHOLD = 3
 # Processor events (distinct from session model events)
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class CompactionNeeded:
     session_id: str
@@ -92,6 +93,7 @@ class DoomLoopWarning:
 # ---------------------------------------------------------------------------
 # Main processor class
 # ---------------------------------------------------------------------------
+
 
 class SessionProcessor:
     """Runs one user turn through the full agent loop."""
@@ -123,6 +125,7 @@ class SessionProcessor:
 
         # 1. Persist user message (or use one already created + displayed by the TUI)
         from openvibe.session.models import MessageCreatedEvent
+
         if user_message is not None:
             user_msg = user_message
         else:
@@ -132,7 +135,9 @@ class SessionProcessor:
                 MessageRole.USER,
                 [TextPart(content=user_text)],
             )
-            await self._bus.publish(MessageCreatedEvent(session_id=session.id, message=user_msg))
+            await self._bus.publish(
+                MessageCreatedEvent(session_id=session.id, message=user_msg)
+            )
 
         # 2. Build LLM message history
         history = session_store.list_messages(self._db, session.id)
@@ -193,17 +198,22 @@ class SessionProcessor:
         # Create the assistant message shell up-front so we have an ID, but
         # don't announce it to the bus yet — wait until first real content so
         # a failed LLM call doesn't leave an empty "assistant" widget in the UI.
-        assistant_msg = session_store.add_message(self._db, session.id, MessageRole.ASSISTANT)
+        assistant_msg = session_store.add_message(
+            self._db, session.id, MessageRole.ASSISTANT
+        )
         assistant_msg.parts = [StepStartPart()]
         session_store.upsert_part(self._db, assistant_msg.id, 0, StepStartPart())
         from openvibe.session.models import MessageCreatedEvent
+
         announced = False
 
         async def _announce() -> None:
             nonlocal announced
             if not announced:
                 announced = True
-                await self._bus.publish(MessageCreatedEvent(session_id=session.id, message=assistant_msg))
+                await self._bus.publish(
+                    MessageCreatedEvent(session_id=session.id, message=assistant_msg)
+                )
 
         ll_messages = _to_llm_messages(history, agent)
         system_prompt = _build_system_prompt(agent)
@@ -233,7 +243,11 @@ class SessionProcessor:
                             assistant_msg, text_part_index, content, t0
                         )
                         await self._bus.publish(
-                            TextDeltaEvent(session_id=session.id, message_id=assistant_msg.id, content=content)
+                            TextDeltaEvent(
+                                session_id=session.id,
+                                message_id=assistant_msg.id,
+                                content=content,
+                            )
                         )
 
                     case ReasoningDelta(content=content):
@@ -242,7 +256,11 @@ class SessionProcessor:
                             assistant_msg, reasoning_part_index, content, t0
                         )
                         await self._bus.publish(
-                            ReasoningDeltaEvent(session_id=session.id, message_id=assistant_msg.id, content=content)
+                            ReasoningDeltaEvent(
+                                session_id=session.id,
+                                message_id=assistant_msg.id,
+                                content=content,
+                            )
                         )
 
                     case ToolCallBegin(index=idx, id=call_id, name=name):
@@ -258,7 +276,9 @@ class SessionProcessor:
                             )
                         )
                         assistant_msg.parts.append(tool_part)
-                        session_store.upsert_part(self._db, assistant_msg.id, part_idx, tool_part)
+                        session_store.upsert_part(
+                            self._db, assistant_msg.id, part_idx, tool_part
+                        )
                         await self._bus.publish(
                             ToolStateChangedEvent(
                                 session_id=session.id,
@@ -271,8 +291,12 @@ class SessionProcessor:
                     case ToolCallDelta():
                         pass  # args accumulate inside ToolCallComplete
 
-                    case ToolCallComplete(index=idx, id=call_id, name=name, arguments=args):
-                        part_idx = tool_part_indices.get(idx, len(assistant_msg.parts) - 1)
+                    case ToolCallComplete(
+                        index=idx, id=call_id, name=name, arguments=args
+                    ):
+                        part_idx = tool_part_indices.get(
+                            idx, len(assistant_msg.parts) - 1
+                        )
                         try:
                             parsed_args = json.loads(args) if args.strip() else {}
                         except json.JSONDecodeError:
@@ -285,7 +309,9 @@ class SessionProcessor:
                         tool_part.state.call_id = call_id
                         tool_part.state.tool_name = name
                         tool_part.state.input = parsed_args
-                        session_store.upsert_part(self._db, assistant_msg.id, part_idx, tool_part)
+                        session_store.upsert_part(
+                            self._db, assistant_msg.id, part_idx, tool_part
+                        )
 
                         # Doom-loop check
                         doom_key = f"{name}:{args}"
@@ -303,7 +329,9 @@ class SessionProcessor:
                                 f"Doom loop detected: '{name}' called with identical "
                                 f"arguments {doom_counts[doom_key]} times."
                             )
-                            session_store.upsert_part(self._db, assistant_msg.id, part_idx, tool_part)
+                            session_store.upsert_part(
+                                self._db, assistant_msg.id, part_idx, tool_part
+                            )
                             continue
 
                         # Execute the tool
@@ -319,12 +347,18 @@ class SessionProcessor:
                         )
 
                         # Store result on the tool part
-                        tool_part.state.status = ToolStateStatus.ERROR if result.error else ToolStateStatus.COMPLETED
+                        tool_part.state.status = (
+                            ToolStateStatus.ERROR
+                            if result.error
+                            else ToolStateStatus.COMPLETED
+                        )
                         tool_part.state.output = result.output
                         tool_part.state.time_end = time.monotonic() - t0
                         if result.error:
                             tool_part.state.error = result.output
-                        session_store.upsert_part(self._db, assistant_msg.id, part_idx, tool_part)
+                        session_store.upsert_part(
+                            self._db, assistant_msg.id, part_idx, tool_part
+                        )
 
                         # Also add a tool-result message for the LLM's next turn
                         session_store.add_message(
@@ -335,7 +369,12 @@ class SessionProcessor:
                         # (We embed the raw result text; the LLM message builder
                         #  will translate this to role="tool" when building the next prompt.)
                         _store_tool_result(
-                            self._db, session.id, call_id, name, result.output, result.error
+                            self._db,
+                            session.id,
+                            call_id,
+                            name,
+                            result.output,
+                            result.error,
                         )
 
                         await self._bus.publish(
@@ -347,8 +386,12 @@ class SessionProcessor:
                             )
                         )
 
-                    case StreamDone(input_tokens=inp, output_tokens=out,
-                                   cache_read_tokens=cr, cache_write_tokens=cw):
+                    case StreamDone(
+                        input_tokens=inp,
+                        output_tokens=out,
+                        cache_read_tokens=cr,
+                        cache_write_tokens=cw,
+                    ):
                         session_store.update_cost(
                             self._db,
                             session.id,
@@ -380,6 +423,7 @@ class SessionProcessor:
         directly without going through the permission service.
         """
         import time as _time
+
         abort = abort or asyncio.Event()
         history = session_store.list_messages(self._db, session.id)
         last_user_msg: MessageInfo | None = None
@@ -390,13 +434,18 @@ class SessionProcessor:
             if msg.role != MessageRole.ASSISTANT:
                 continue
             for i, part in enumerate(msg.parts):
-                if not isinstance(part, ToolPart) or not part.state.call_id or part.state.output is not None:
+                if (
+                    not isinstance(part, ToolPart)
+                    or not part.state.call_id
+                    or part.state.output is not None
+                ):
                     continue
 
                 if allow:
                     tool = self._registry.get(part.state.tool_name)
                     if tool:
                         from openvibe.tool.base import ToolContext
+
                         ctx = ToolContext(
                             session_id=session.id,
                             message_id=msg.id,
@@ -411,7 +460,11 @@ class SessionProcessor:
                         t0 = _time.monotonic()
                         try:
                             result = await tool(ctx, part.state.input)
-                            part.state.status = ToolStateStatus.ERROR if result.error else ToolStateStatus.COMPLETED
+                            part.state.status = (
+                                ToolStateStatus.ERROR
+                                if result.error
+                                else ToolStateStatus.COMPLETED
+                            )
                             part.state.output = result.output
                             part.state.time_end = _time.monotonic() - t0
                             if result.error:
@@ -443,7 +496,9 @@ class SessionProcessor:
             final_msg = session_store.add_message(
                 self._db, session.id, MessageRole.ASSISTANT, [TextPart(content="")]
             )
-            await self._bus.publish(TurnCompletedEvent(session_id=session.id, message_id=final_msg.id))
+            await self._bus.publish(
+                TurnCompletedEvent(session_id=session.id, message_id=final_msg.id)
+            )
             return final_msg
 
         # Continue the LLM turn using the existing last user message as anchor.
@@ -461,7 +516,11 @@ class SessionProcessor:
         content: str,
         t0: float,
     ) -> int:
-        existing = msg.parts[part_idx] if part_idx is not None and part_idx < len(msg.parts) else None
+        existing = (
+            msg.parts[part_idx]
+            if part_idx is not None and part_idx < len(msg.parts)
+            else None
+        )
         if not isinstance(existing, TextPart):
             part_idx = len(msg.parts)
             part = TextPart(content=content, time_start=time.monotonic() - t0)
@@ -481,7 +540,11 @@ class SessionProcessor:
         t0: float,
     ) -> int:
         if part_idx is None or not isinstance(
-            msg.parts[part_idx] if part_idx is not None and part_idx < len(msg.parts) else None,
+            (
+                msg.parts[part_idx]
+                if part_idx is not None and part_idx < len(msg.parts)
+                else None
+            ),
             ReasoningPart,
         ):
             part_idx = len(msg.parts)
@@ -532,7 +595,11 @@ class SessionProcessor:
         try:
             return await tool(ctx, args)
         except Exception as exc:
-            from openvibe.permission.permission import PermissionDenied, PermissionRejected
+            from openvibe.permission.permission import (
+                PermissionDenied,
+                PermissionRejected,
+            )
+
             if isinstance(exc, (PermissionDenied, PermissionRejected)):
                 return ToolResult(
                     title=f"Permission denied: {name}",
@@ -546,7 +613,10 @@ class SessionProcessor:
 # Standalone helpers
 # ---------------------------------------------------------------------------
 
-def _build_tool_definitions(registry: ToolRegistry, agent: "AgentInfo") -> list[ToolDefinition]:
+
+def _build_tool_definitions(
+    registry: ToolRegistry, agent: "AgentInfo"
+) -> list[ToolDefinition]:
     disabled = set(agent.disabled_tools or [])
     return [
         ToolDefinition(
@@ -629,9 +699,7 @@ def _to_llm_messages(history: list[MessageInfo], agent: "AgentInfo") -> list[Mes
 
 
 def _extract_text(msg: MessageInfo) -> str:
-    return "\n".join(
-        p.content for p in msg.parts if isinstance(p, TextPart)
-    ).strip()
+    return "\n".join(p.content for p in msg.parts if isinstance(p, TextPart)).strip()
 
 
 def _store_tool_result(

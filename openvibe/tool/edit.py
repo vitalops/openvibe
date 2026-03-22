@@ -16,7 +16,9 @@ from openvibe.tool.base import Tool, ToolContext, ToolResult
 
 
 class _Edit(BaseModel):
-    old_string: str = Field(description="Exact string to find. Must appear exactly once.")
+    old_string: str = Field(
+        description="Exact string to find. Must appear exactly once."
+    )
     new_string: str = Field(description="Replacement string.")
 
 
@@ -45,7 +47,11 @@ class EditTool(Tool):
         )
 
         if not path.exists():
-            return ToolResult(title=f"Edit {params.path}", output=f"File not found: {path}", error=True)
+            return ToolResult(
+                title=f"Edit {params.path}",
+                output=f"File not found: {path}",
+                error=True,
+            )
 
         try:
             content = path.read_text(encoding="utf-8")

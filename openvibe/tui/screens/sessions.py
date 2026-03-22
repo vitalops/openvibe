@@ -107,7 +107,8 @@ class SessionListScreen(Screen[str | None]):
         q = event.value.lower()
         filtered = (
             [
-                s for s in self._all_sessions
+                s
+                for s in self._all_sessions
                 if q in (s.title or "").lower() or q in s.id.lower()
             ]
             if q

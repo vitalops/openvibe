@@ -18,10 +18,10 @@ from openvibe.config import AgentConfig, Config
 
 from tests.mock_llm import MockLLM, ScriptedMockLLM
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _ov(tmp_path: Path, llm=None, config: Config | None = None) -> OpenVibe:
     """Create an OpenVibe wired with a temp DB and optional mock LLM."""
@@ -48,6 +48,7 @@ def _messages_after_send(tmp_path: Path, user_text: str = "foo", reply: str = "b
 # ---------------------------------------------------------------------------
 # OpenVibe lifecycle
 # ---------------------------------------------------------------------------
+
 
 def test_context_manager_starts_and_closes(tmp_path):
     with _ov(tmp_path) as ov:
@@ -85,6 +86,7 @@ def test_close_is_idempotent(tmp_path):
 # ---------------------------------------------------------------------------
 # Session management (CRUD)
 # ---------------------------------------------------------------------------
+
 
 def test_create_session(tmp_path):
     with _ov(tmp_path) as ov:
@@ -147,6 +149,7 @@ def test_different_agents(tmp_path):
 # Session.send() — simple text turns
 # ---------------------------------------------------------------------------
 
+
 def test_send_returns_idle_state(tmp_path):
     llm = MockLLM({"ping": "pong"})
     with _ov(tmp_path, llm=llm) as ov:
@@ -197,6 +200,7 @@ def test_send_on_token_called_before_return(tmp_path):
 # Session.messages() — history persistence
 # ---------------------------------------------------------------------------
 
+
 def test_messages_stored_after_send(tmp_path):
     llm = MockLLM({"hi": "hello"})
     with _ov(tmp_path, llm=llm) as ov:
@@ -229,6 +233,7 @@ def test_multi_turn_responses_are_correct(tmp_path):
 # FSM state enforcement
 # ---------------------------------------------------------------------------
 
+
 def test_send_in_thinking_state_raises(tmp_path):
     llm = MockLLM({"x": "y"})
     with _ov(tmp_path, llm=llm) as ov:
@@ -258,6 +263,7 @@ def test_send_nowait_in_thinking_state_raises(tmp_path):
 # ---------------------------------------------------------------------------
 # Non-blocking API
 # ---------------------------------------------------------------------------
+
 
 def test_send_nowait_returns_immediately(tmp_path):
     started = threading.Event()
@@ -315,6 +321,7 @@ def test_send_nowait_callback_tokens(tmp_path):
 # Permission flow (WAITING → reply)
 # ---------------------------------------------------------------------------
 
+
 def test_permission_ask_triggers_waiting(tmp_path):
     """Bash tool is ASK in the build agent — must return WAITING."""
     llm = ScriptedMockLLM([("bash", {"command": "echo hello"}), "done"])
@@ -365,6 +372,7 @@ def test_permission_request_has_options(tmp_path):
 # Abort
 # ---------------------------------------------------------------------------
 
+
 def test_abort_resets_to_idle(tmp_path):
     with _ov(tmp_path) as ov:
         session = ov.create_session()
@@ -393,6 +401,7 @@ def test_abort_during_send_nowait(tmp_path):
 # ---------------------------------------------------------------------------
 # run() one-shot convenience
 # ---------------------------------------------------------------------------
+
 
 def test_run_returns_idle_response(tmp_path):
     llm = MockLLM({"what is up": "not much"})
@@ -448,6 +457,7 @@ def test_run_creates_isolated_session(tmp_path):
 # Doom-loop protection
 # ---------------------------------------------------------------------------
 
+
 def test_doom_loop_guard_fires(tmp_path):
     """The same tool+args repeated >= 3 times must be rejected."""
     config = Config(agent={"build": AgentConfig(max_steps=5)})
@@ -461,12 +471,11 @@ def test_doom_loop_guard_fires(tmp_path):
 
         session = ov.get_session(resp.messages[-1].session_id)
         all_parts = [
-            p
-            for m in session.messages()
-            for p in m.parts
-            if isinstance(p, ToolPart)
+            p for m in session.messages() for p in m.parts if isinstance(p, ToolPart)
         ]
-        doom_parts = [p for p in all_parts if p.state.output and "Doom loop" in p.state.output]
+        doom_parts = [
+            p for p in all_parts if p.state.output and "Doom loop" in p.state.output
+        ]
         assert len(doom_parts) >= 1
 
 
@@ -474,38 +483,45 @@ def test_doom_loop_guard_fires(tmp_path):
 # Error classification (_classify_error)
 # ---------------------------------------------------------------------------
 
+
 def test_classify_auth_error():
     from openvibe.api import _classify_error
+
     kind, _ = _classify_error(Exception("Invalid API key provided"))
     assert kind == "auth"
 
 
 def test_classify_unauthorized_error():
     from openvibe.api import _classify_error
+
     kind, _ = _classify_error(Exception("401 Unauthorized"))
     assert kind == "auth"
 
 
 def test_classify_context_overflow_error():
     from openvibe.api import _classify_error
+
     kind, _ = _classify_error(Exception("context length exceeded limit"))
     assert kind == "context_overflow"
 
 
 def test_classify_context_window_error():
     from openvibe.api import _classify_error
+
     kind, _ = _classify_error(Exception("context window too large"))
     assert kind == "context_overflow"
 
 
 def test_classify_generic_api_error():
     from openvibe.api import _classify_error
+
     kind, _ = _classify_error(Exception("something went wrong"))
     assert kind == "api_error"
 
 
 def test_classify_error_returns_original_message():
     from openvibe.api import _classify_error
+
     _, msg = _classify_error(Exception("original message text"))
     assert "original message text" in msg
 
@@ -514,8 +530,10 @@ def test_classify_error_returns_original_message():
 # _messages_to_litellm conversion
 # ---------------------------------------------------------------------------
 
+
 def test_messages_to_litellm_user_role(tmp_path):
     from openvibe.api import _messages_to_litellm
+
     msgs = _messages_after_send(tmp_path, "foo", "bar")
     roles = [m["role"] for m in _messages_to_litellm(msgs)]
     assert "user" in roles
@@ -523,6 +541,7 @@ def test_messages_to_litellm_user_role(tmp_path):
 
 def test_messages_to_litellm_assistant_role(tmp_path):
     from openvibe.api import _messages_to_litellm
+
     msgs = _messages_after_send(tmp_path, "foo", "bar")
     roles = [m["role"] for m in _messages_to_litellm(msgs)]
     assert "assistant" in roles
@@ -530,6 +549,7 @@ def test_messages_to_litellm_assistant_role(tmp_path):
 
 def test_messages_to_litellm_text_preserved(tmp_path):
     from openvibe.api import _messages_to_litellm
+
     msgs = _messages_after_send(tmp_path, "foo", "bar")
     ll = _messages_to_litellm(msgs)
     user_msg = next(m for m in ll if m["role"] == "user")
@@ -539,6 +559,7 @@ def test_messages_to_litellm_text_preserved(tmp_path):
 # ---------------------------------------------------------------------------
 # get_session returns a working Session
 # ---------------------------------------------------------------------------
+
 
 def test_get_session_can_continue_conversation(tmp_path):
     llm = MockLLM({"start": "begun", "continue": "continued"})
@@ -555,6 +576,7 @@ def test_get_session_can_continue_conversation(tmp_path):
 # ---------------------------------------------------------------------------
 # reply_nowait
 # ---------------------------------------------------------------------------
+
 
 def test_reply_nowait_in_idle_raises(tmp_path):
     with _ov(tmp_path) as ov:
@@ -608,13 +630,16 @@ def test_reply_nowait_without_callback_still_transitions(tmp_path):
 # on_message and on_tool callbacks
 # ---------------------------------------------------------------------------
 
+
 def test_send_on_message_accepted_without_error(tmp_path):
     """on_message is stored but not called in the sync worker path — must not crash."""
     llm = MockLLM({"hello": "world"})
     with _ov(tmp_path, llm=llm) as ov:
         session = ov.create_session()
         events: list[tuple[str, str]] = []
-        resp = session.send("hello", on_message=lambda msg_id, role: events.append((msg_id, role)))
+        resp = session.send(
+            "hello", on_message=lambda msg_id, role: events.append((msg_id, role))
+        )
         # Sync path does not fire on_message — just verify no exception and correct state.
         assert resp.state == SessionState.IDLE
         assert resp.text == "world"
@@ -636,6 +661,7 @@ def test_send_on_tool_accepted_without_error(tmp_path):
 # ---------------------------------------------------------------------------
 # ERROR state and recovery
 # ---------------------------------------------------------------------------
+
 
 def test_send_error_response_on_llm_exception(tmp_path):
     def boom(model, messages, **kw):
@@ -671,6 +697,7 @@ def test_auth_error_classified_correctly(tmp_path):
 # delete_session archives (hides from listing, does not hard-delete)
 # ---------------------------------------------------------------------------
 
+
 def test_delete_session_archives_not_hard_deletes(tmp_path):
     """delete_session() archives so the session is hidden from list_sessions()
     but still retrievable by ID."""
@@ -690,6 +717,7 @@ def test_delete_session_archives_not_hard_deletes(tmp_path):
 # ---------------------------------------------------------------------------
 # _build_system_prompt
 # ---------------------------------------------------------------------------
+
 
 def test_build_system_prompt_with_base_only():
     from openvibe.api import _build_system_prompt
@@ -727,6 +755,7 @@ def test_build_system_prompt_empty_agent():
 # _model_string
 # ---------------------------------------------------------------------------
 
+
 def test_model_string_default():
     from openvibe.api import _model_string
     from openvibe.agent.agent import AgentInfo
@@ -753,6 +782,7 @@ def test_model_string_with_model():
 # _messages_to_litellm — tool call serialisation
 # ---------------------------------------------------------------------------
 
+
 def test_messages_to_litellm_with_tool_call(tmp_path):
     """An assistant message with a ToolPart must produce tool_calls + tool result."""
     from openvibe.api import _messages_to_litellm
@@ -762,7 +792,9 @@ def test_messages_to_litellm_with_tool_call(tmp_path):
     llm = ScriptedMockLLM([("bash", {"command": "echo hi"}), "done"])
     with _ov(tmp_path, llm=llm) as ov:
         session = ov.create_session(agent="build")
-        resp = session.send("run it", )
+        resp = session.send(
+            "run it",
+        )
         # auto-allow so we get a complete turn
         if resp.state == SessionState.WAITING:
             resp = session.reply(resp.request.id, "allow")
@@ -790,13 +822,20 @@ def test_messages_to_litellm_skips_empty_assistant_messages(tmp_path):
         all_msgs = s.messages()
         ll = _messages_to_litellm(all_msgs)
         # The empty assistant message must be skipped
-        empty = [m for m in ll if m["role"] == "assistant" and not m.get("content") and not m.get("tool_calls")]
+        empty = [
+            m
+            for m in ll
+            if m["role"] == "assistant"
+            and not m.get("content")
+            and not m.get("tool_calls")
+        ]
         assert not empty
 
 
 # ---------------------------------------------------------------------------
 # run() with custom agent
 # ---------------------------------------------------------------------------
+
 
 def test_run_with_plan_agent(tmp_path):
     llm = MockLLM({"analyse this": "analysis done"})
@@ -810,8 +849,10 @@ def test_run_with_plan_agent(tmp_path):
 # FSM edge cases
 # ---------------------------------------------------------------------------
 
+
 def test_send_after_error_state_raises(tmp_path):
     """After the session enters ERROR, send() must raise InvalidStateError."""
+
     def boom(model, messages, **kw):
         raise RuntimeError("boom")
 
@@ -840,6 +881,7 @@ def test_reply_in_waiting_with_wrong_request_id_still_resumes(tmp_path):
 # allow_always permission option
 # ---------------------------------------------------------------------------
 
+
 def test_permission_allow_always_resumes_to_idle(tmp_path):
     """reply with 'allow_always' must behave like 'allow' in the sync path."""
     llm = ScriptedMockLLM([("bash", {"command": "echo hi"}), "done"])
@@ -855,6 +897,7 @@ def test_permission_allow_always_resumes_to_idle(tmp_path):
 # ---------------------------------------------------------------------------
 # _messages_to_litellm — tool without output
 # ---------------------------------------------------------------------------
+
 
 def test_messages_to_litellm_tool_without_output(tmp_path):
     """ToolPart with output=None must emit a synthetic tool result.
@@ -874,14 +917,18 @@ def test_messages_to_litellm_tool_without_output(tmp_path):
         # Create an assistant message with a ToolPart that has no output yet
         msg = _session_store.add_message(ov._db, s.id, MessageRole.ASSISTANT)
         _session_store.upsert_part(
-            ov._db, msg.id, 0,
-            ToolPart(state=ToolState(
-                status=ToolStateStatus.RUNNING,
-                call_id="call_x",
-                tool_name="bash",
-                input={"command": "ls"},
-                output=None,  # interrupted — no output
-            ))
+            ov._db,
+            msg.id,
+            0,
+            ToolPart(
+                state=ToolState(
+                    status=ToolStateStatus.RUNNING,
+                    call_id="call_x",
+                    tool_name="bash",
+                    input={"command": "ls"},
+                    output=None,  # interrupted — no output
+                )
+            ),
         )
         ll = _messages_to_litellm(s.messages())
         tool_result_rows = [m for m in ll if m.get("role") == "tool"]
@@ -895,6 +942,7 @@ def test_messages_to_litellm_tool_without_output(tmp_path):
 # Session message isolation
 # ---------------------------------------------------------------------------
 
+
 def test_sessions_have_isolated_message_history(tmp_path):
     """Messages from session A must not appear in session B."""
     llm = MockLLM({"a": "reply_a", "b": "reply_b"})
@@ -904,16 +952,10 @@ def test_sessions_have_isolated_message_history(tmp_path):
         sa.send("a")
         sb.send("b")
         contents_a = [
-            p.content
-            for m in sa.messages()
-            for p in m.parts
-            if hasattr(p, "content")
+            p.content for m in sa.messages() for p in m.parts if hasattr(p, "content")
         ]
         contents_b = [
-            p.content
-            for m in sb.messages()
-            for p in m.parts
-            if hasattr(p, "content")
+            p.content for m in sb.messages() for p in m.parts if hasattr(p, "content")
         ]
         assert "reply_a" in contents_a
         assert "reply_a" not in contents_b
@@ -924,6 +966,7 @@ def test_sessions_have_isolated_message_history(tmp_path):
 # ---------------------------------------------------------------------------
 # project_dir property
 # ---------------------------------------------------------------------------
+
 
 def test_project_dir_property(tmp_path):
     with _ov(tmp_path) as ov:

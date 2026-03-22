@@ -39,6 +39,7 @@ class Event:
         class SessionCreatedEvent(Event):
             title: str
     """
+
     session_id: str | None = field(default=None)
 
 

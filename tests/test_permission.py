@@ -12,10 +12,10 @@ from openvibe.permission.permission import (
     _matches,
 )
 
-
 # ---------------------------------------------------------------------------
 # _matches — tool name matching
 # ---------------------------------------------------------------------------
+
 
 def test_matches_exact_tool_name():
     rule = Rule(tool="bash", action=PermissionAction.ALLOW)
@@ -65,6 +65,7 @@ def test_matches_wildcard_tool():
 # PermissionDenied
 # ---------------------------------------------------------------------------
 
+
 def test_permission_denied_str():
     exc = PermissionDenied("bash")
     assert "bash" in str(exc)
@@ -80,6 +81,7 @@ def test_permission_denied_with_pattern():
 # ---------------------------------------------------------------------------
 # PermissionRejected
 # ---------------------------------------------------------------------------
+
 
 def test_permission_rejected_str():
     exc = PermissionRejected("write")
@@ -114,6 +116,7 @@ def test_matches_no_pattern_rule_ignores_argument():
 # ---------------------------------------------------------------------------
 # PermissionService — save_rule / load_rules
 # ---------------------------------------------------------------------------
+
 
 def test_permission_service_save_and_load_rules(tmp_path):
     """save_rule() persists a rule that load_rules() can retrieve."""

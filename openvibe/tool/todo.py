@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 # TodoWriteTool
 # ---------------------------------------------------------------------------
 
+
 class TodoWriteTool(Tool):
     name = "todo_write"
     description = (
@@ -41,8 +42,11 @@ class TodoWriteTool(Tool):
             "items not included are deleted.",
         )
 
-    async def execute(self, ctx: ToolContext, params: "TodoWriteTool.Params") -> ToolResult:
+    async def execute(
+        self, ctx: ToolContext, params: "TodoWriteTool.Params"
+    ) -> ToolResult:
         from openvibe.tool.todo import _sync_todos  # avoid circular at module level
+
         count = _sync_todos(ctx, params.todos)
         return ToolResult(
             title="Updated todo list",
@@ -80,7 +84,15 @@ def _sync_todos(ctx: ToolContext, items: list[_TodoItem]) -> int:
         db.execute(
             "INSERT INTO todos (id, session_id, content, status, priority, created_at, updated_at) "
             "VALUES (?,?,?,?,?,?,?)",
-            (todo_id, ctx.session_id, item.content, item.status, item.priority, now, now),
+            (
+                todo_id,
+                ctx.session_id,
+                item.content,
+                item.status,
+                item.priority,
+                now,
+                now,
+            ),
         )
     return len(items)
 
@@ -88,6 +100,7 @@ def _sync_todos(ctx: ToolContext, items: list[_TodoItem]) -> int:
 # ---------------------------------------------------------------------------
 # TodoReadTool
 # ---------------------------------------------------------------------------
+
 
 class TodoReadTool(Tool):
     name = "todo_read"
@@ -99,7 +112,9 @@ class TodoReadTool(Tool):
     class Params(Tool.Params):
         pass
 
-    async def execute(self, ctx: ToolContext, params: "TodoReadTool.Params") -> ToolResult:
+    async def execute(
+        self, ctx: ToolContext, params: "TodoReadTool.Params"
+    ) -> ToolResult:
         db = getattr(ctx, "_db", None)
         if db is None:
             return ToolResult(title="Todos", output="(no todo storage available)")
@@ -115,10 +130,15 @@ class TodoReadTool(Tool):
 
         lines = []
         for row in rows:
-            status_icon = {"pending": "○", "in_progress": "◎", "completed": "✓", "cancelled": "✗"}.get(
-                row["status"], "?"
+            status_icon = {
+                "pending": "○",
+                "in_progress": "◎",
+                "completed": "✓",
+                "cancelled": "✗",
+            }.get(row["status"], "?")
+            lines.append(
+                f"[{status_icon}] ({row['priority']}) {row['content']}  id={row['id']}"
             )
-            lines.append(f"[{status_icon}] ({row['priority']}) {row['content']}  id={row['id']}")
 
         return ToolResult(
             title=f"Todos ({len(rows)} items)",

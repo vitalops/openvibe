@@ -65,9 +65,11 @@ MAX_OUTPUT_CHARS = 4_000
 # Context and Result
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ToolContext:
     """Runtime context passed to every tool execution."""
+
     session_id: str
     message_id: str
     agent_name: str
@@ -79,7 +81,9 @@ class ToolContext:
     _permissions: "PermissionService | None" = field(default=None, repr=False)
     _messages: list["Message"] = field(default_factory=list, repr=False)
 
-    async def check_permission(self, tool: str, argument: str | None = None, description: str = "") -> None:
+    async def check_permission(
+        self, tool: str, argument: str | None = None, description: str = ""
+    ) -> None:
         """Raise PermissionDenied / PermissionRejected if not allowed."""
         if self._permissions:
             await self._permissions.check(
@@ -94,6 +98,7 @@ class ToolContext:
 @dataclass
 class Attachment:
     """Binary or text attachment to include alongside tool output."""
+
     filename: str
     content: bytes
     media_type: str = "text/plain"
@@ -102,6 +107,7 @@ class Attachment:
 @dataclass
 class ToolResult:
     """Structured output returned by a tool."""
+
     title: str
     output: str
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -119,6 +125,7 @@ class ToolResult:
 # Tool ABC
 # ---------------------------------------------------------------------------
 
+
 class Tool(abc.ABC):
     """Abstract base class for all openvibe tools.
 
@@ -127,11 +134,12 @@ class Tool(abc.ABC):
     ``pydantic.BaseModel``) defines the tool's parameter schema.
     """
 
-    name: str                   # must be set by subclass
-    description: str            # must be set by subclass
+    name: str  # must be set by subclass
+    description: str  # must be set by subclass
 
     class Params(BaseModel):
         """Override in subclasses to define tool parameters."""
+
         model_config = {"extra": "forbid"}
 
     def parameters_schema(self) -> dict[str, Any]:
@@ -143,7 +151,9 @@ class Tool(abc.ABC):
         """Execute the tool with *params* in *ctx*. Must be overridden."""
         ...
 
-    async def __call__(self, ctx: ToolContext, raw_args: str | dict[str, Any]) -> ToolResult:
+    async def __call__(
+        self, ctx: ToolContext, raw_args: str | dict[str, Any]
+    ) -> ToolResult:
         """Parse *raw_args* and call ``execute``. Handles validation errors."""
         if isinstance(raw_args, str):
             try:
@@ -172,6 +182,7 @@ class Tool(abc.ABC):
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
+
 
 class ToolRegistry:
     """Holds all available tools, keyed by name."""

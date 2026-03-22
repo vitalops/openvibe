@@ -37,7 +37,9 @@ class GlobTool(Tool):
                 reverse=True,
             )
         except OSError as exc:
-            return ToolResult(title=f"Glob {params.pattern}", output=str(exc), error=True)
+            return ToolResult(
+                title=f"Glob {params.pattern}", output=str(exc), error=True
+            )
 
         # Only return files, not directories; cap at 200
         files = [str(p) for p in matches if p.is_file()][:200]

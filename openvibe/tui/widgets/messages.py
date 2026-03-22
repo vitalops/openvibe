@@ -13,10 +13,10 @@ from textual.containers import VerticalScroll
 from textual.widget import Widget
 from textual.widgets import Static
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _looks_like_diff(text: str) -> bool:
     """Return True if the text looks like a unified diff."""
@@ -31,17 +31,17 @@ def _looks_like_diff(text: str) -> bool:
 # ---------------------------------------------------------------------------
 
 _STATUS_ICON: dict[str, str] = {
-    "pending":   "○",
-    "running":   "◎",
+    "pending": "○",
+    "running": "◎",
     "completed": "●",
-    "error":     "✗",
+    "error": "✗",
 }
 
 _STATUS_STYLE: dict[str, str] = {
-    "pending":   "dim",
-    "running":   "yellow",
+    "pending": "dim",
+    "running": "yellow",
     "completed": "green",
-    "error":     "red",
+    "error": "red",
 }
 
 
@@ -128,6 +128,7 @@ class ToolWidget(Widget):
 # ---------------------------------------------------------------------------
 # Single message widget
 # ---------------------------------------------------------------------------
+
 
 class MessageWidget(Widget):
     """Renders one message: streaming text and optional tool parts."""
@@ -255,6 +256,7 @@ class MessageWidget(Widget):
 # ---------------------------------------------------------------------------
 # Message list (scrollable container)
 # ---------------------------------------------------------------------------
+
 
 class MessageList(VerticalScroll):
     """Scrollable list of MessageWidgets; receives updates from SessionScreen."""

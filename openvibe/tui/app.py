@@ -17,7 +17,6 @@ from textual import work  # noqa: F401 – used via @work decorator
 
 from openvibe.api import OpenVibe
 
-
 _CSS = """
 Screen {
     background: #000000;
@@ -53,6 +52,7 @@ class OpenvibeApp(App[None]):
     async def on_mount(self) -> None:
         if _needs_setup(self._project_dir):
             from openvibe.tui.screens.setup import SetupWizardScreen
+
             self.push_screen(SetupWizardScreen(), callback=self._after_wizard)
         else:
             self._finish_startup()
@@ -65,6 +65,7 @@ class OpenvibeApp(App[None]):
     async def _finish_startup(self) -> None:
         self.ov = await OpenVibe(project_dir=self._project_dir).start_async()
         from openvibe.tui.screens.welcome import WelcomeScreen
+
         await self.push_screen(WelcomeScreen())
 
     async def on_unmount(self) -> None:
@@ -111,6 +112,7 @@ class OpenvibeApp(App[None]):
 def _needs_setup(project_dir: Path) -> bool:
     """Return True if no model is configured from any config source."""
     from openvibe.config import load_config
+
     try:
         return load_config(project_dir).model is None
     except Exception:

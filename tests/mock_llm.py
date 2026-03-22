@@ -22,18 +22,22 @@ import json
 from types import SimpleNamespace
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # Low-level chunk builders
 # These produce objects with the same attribute shape as litellm chunks so
 # the _run_turn loop can iterate over them without modification.
 # ---------------------------------------------------------------------------
 
-def _delta(content: str | None = None, tool_calls: list | None = None) -> SimpleNamespace:
+
+def _delta(
+    content: str | None = None, tool_calls: list | None = None
+) -> SimpleNamespace:
     return SimpleNamespace(content=content, tool_calls=tool_calls)
 
 
-def _choice(delta: SimpleNamespace, finish_reason: str | None = None) -> SimpleNamespace:
+def _choice(
+    delta: SimpleNamespace, finish_reason: str | None = None
+) -> SimpleNamespace:
     return SimpleNamespace(delta=delta, finish_reason=finish_reason)
 
 
@@ -67,6 +71,7 @@ def _tool_call_fragment(
 # Stream factories
 # ---------------------------------------------------------------------------
 
+
 def text_stream(text: str) -> list[SimpleNamespace]:
     """Two chunks: one carrying the text, one carrying finish_reason."""
     return [
@@ -91,6 +96,7 @@ def tool_call_stream(
 # ---------------------------------------------------------------------------
 # MockLLM — str → str dict
 # ---------------------------------------------------------------------------
+
 
 class MockLLM:
     """Simple mock LLM backed by a ``responses`` dict.
@@ -117,7 +123,9 @@ class MockLLM:
         self.responses = responses
         self.fallback = fallback
 
-    def __call__(self, model: str, messages: list[Any], **kwargs: Any) -> list[SimpleNamespace]:
+    def __call__(
+        self, model: str, messages: list[Any], **kwargs: Any
+    ) -> list[SimpleNamespace]:
         user_text = self._last_user_text(messages)
         reply = self.responses.get(user_text, self.fallback)
         return text_stream(reply)
@@ -135,6 +143,7 @@ class MockLLM:
 # ---------------------------------------------------------------------------
 # ScriptedMockLLM — ordered sequence of responses
 # ---------------------------------------------------------------------------
+
 
 class ScriptedMockLLM:
     """Mock LLM that replays a scripted sequence of responses.
@@ -164,7 +173,9 @@ class ScriptedMockLLM:
         self._script = list(script)
         self.call_count = 0
 
-    def __call__(self, model: str, messages: list[Any], **kwargs: Any) -> list[SimpleNamespace]:
+    def __call__(
+        self, model: str, messages: list[Any], **kwargs: Any
+    ) -> list[SimpleNamespace]:
         idx = min(self.call_count, len(self._script) - 1)
         self.call_count += 1
         entry = self._script[idx]

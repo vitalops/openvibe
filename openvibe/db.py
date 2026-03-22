@@ -150,6 +150,7 @@ CREATE INDEX IF NOT EXISTS idx_permissions_proj ON permissions(project_id);
 # SQLite implementation
 # ---------------------------------------------------------------------------
 
+
 class SQLiteDatabase:
     """Raw SQLite implementation of ``Database``.
 
@@ -220,9 +221,11 @@ class SQLiteDatabase:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def default_db_path() -> Path:
     """Return ``~/.openvibe/openvibe.db`` (honouring ``OPENVIBE_CHANNEL``)."""
     import os
+
     channel = os.environ.get("OPENVIBE_CHANNEL", "")
     suffix = f".{channel}" if channel else ""
     return Path.home() / ".openvibe" / f"openvibe{suffix}.db"

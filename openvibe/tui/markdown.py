@@ -21,7 +21,6 @@ from pygments.util import ClassNotFound
 from rich.markup import escape
 from rich.text import Text
 
-
 # ---------------------------------------------------------------------------
 # Pygments → ANSI highlighted string
 # ---------------------------------------------------------------------------
@@ -44,7 +43,9 @@ def _highlight_code(code: str, lang: str | None) -> str:
 
 _CODE_START = "\x00CS\x00"
 _CODE_END = "\x00CE\x00"
-_CODE_RE = re.compile(re.escape(_CODE_START) + "(.*?)" + re.escape(_CODE_END), re.DOTALL)
+_CODE_RE = re.compile(
+    re.escape(_CODE_START) + "(.*?)" + re.escape(_CODE_END), re.DOTALL
+)
 
 # ---------------------------------------------------------------------------
 # Mistune renderer → Rich markup (with ANSI sentinels for code)

@@ -71,10 +71,10 @@ from openvibe.session.models import SessionInfo
 from openvibe.session.processor import SessionProcessor
 from openvibe.tool.base import ToolRegistry, create_default_registry
 
-
 # ---------------------------------------------------------------------------
 # Application state
 # ---------------------------------------------------------------------------
+
 
 class AppState:
     """All live objects that make up one running openvibe instance."""
@@ -175,6 +175,7 @@ State = Annotated[AppState, Depends(get_state)]
 # Request / response models
 # ---------------------------------------------------------------------------
 
+
 class CreateSessionRequest(BaseModel):
     title: str | None = None
     agent: str | None = None
@@ -206,6 +207,7 @@ class ResumeSessionRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # App factory
 # ---------------------------------------------------------------------------
+
 
 def create_app(
     project_dir: Path | None = None,
@@ -266,7 +268,10 @@ def create_app(
             title=body.title,
         )
         from openvibe.session.models import SessionCreatedEvent
-        await state.bus.publish(SessionCreatedEvent(session_id=session.id, session=session))
+
+        await state.bus.publish(
+            SessionCreatedEvent(session_id=session.id, session=session)
+        )
         return session
 
     @app.get("/session", response_model=list[SessionInfo])
@@ -282,7 +287,9 @@ def create_app(
         return session
 
     @app.patch("/session/{session_id}", response_model=SessionInfo)
-    async def update_session(session_id: str, body: UpdateSessionRequest, state: State) -> SessionInfo:
+    async def update_session(
+        session_id: str, body: UpdateSessionRequest, state: State
+    ) -> SessionInfo:
         session = session_store.get(state.db, session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
@@ -290,7 +297,10 @@ def create_app(
         updated = session_store.get(state.db, session_id)
         assert updated
         from openvibe.session.models import SessionUpdatedEvent
-        await state.bus.publish(SessionUpdatedEvent(session_id=session_id, session=updated))
+
+        await state.bus.publish(
+            SessionUpdatedEvent(session_id=session_id, session=updated)
+        )
         return updated
 
     @app.delete("/session/{session_id}")
@@ -325,9 +335,7 @@ def create_app(
 
         abort = asyncio.Event()
         coro = state.processor.run(session, resolved_agent, body.text, abort)
-        return EventSourceResponse(
-            _make_event_stream(coro, session_id, state, abort)
-        )
+        return EventSourceResponse(_make_event_stream(coro, session_id, state, abort))
 
     @app.get("/session/{session_id}/state")
     async def get_session_state(session_id: str, state: State) -> dict[str, Any]:
@@ -346,11 +354,15 @@ def create_app(
             raise HTTPException(status_code=404, detail="Session not found")
 
         if session_id in _active_aborts:
-            current_state = "waiting" if session_id in _pending_permissions else "thinking"
+            current_state = (
+                "waiting" if session_id in _pending_permissions else "thinking"
+            )
         else:
             messages = session_store.list_messages(state.db, session_id)
             interrupted = any(
-                isinstance(part, ToolPart) and part.state.call_id and part.state.output is None
+                isinstance(part, ToolPart)
+                and part.state.call_id
+                and part.state.output is None
                 for msg in messages
                 for part in msg.parts
             )
@@ -402,21 +414,25 @@ def create_app(
 
         messages = session_store.list_messages(state.db, session_id)
         interrupted = any(
-            isinstance(part, ToolPart) and part.state.call_id and part.state.output is None
+            isinstance(part, ToolPart)
+            and part.state.call_id
+            and part.state.output is None
             for msg in messages
             for part in msg.parts
         )
         if not interrupted:
-            raise HTTPException(status_code=400, detail="Session has no interrupted tool calls")
+            raise HTTPException(
+                status_code=400, detail="Session has no interrupted tool calls"
+            )
 
         agent_name = body.agent or state.config.default_agent
         resolved_agent = agent_module.resolve(state.config, agent_name)
 
         abort = asyncio.Event()
-        coro = state.processor.resume_interrupted(session, resolved_agent, body.allow, abort)
-        return EventSourceResponse(
-            _make_event_stream(coro, session_id, state, abort)
+        coro = state.processor.resume_interrupted(
+            session, resolved_agent, body.allow, abort
         )
+        return EventSourceResponse(_make_event_stream(coro, session_id, state, abort))
 
     # ------------------------------------------------------------------
     # Provider / model routes
@@ -460,7 +476,12 @@ def create_app(
     @app.get("/mcp")
     async def get_mcp_status(state: State) -> list[dict[str, Any]]:
         return [
-            {"name": s.name, "connected": s.connected, "tools": s.tools, "error": s.error}
+            {
+                "name": s.name,
+                "connected": s.connected,
+                "tools": s.tools,
+                "error": s.error,
+            }
             for s in state.mcp.status()
         ]
 
@@ -469,9 +490,13 @@ def create_app(
     # ------------------------------------------------------------------
 
     @app.post("/permission/reply")
-    async def reply_permission(body: PermissionReplyRequest, state: State) -> dict[str, str]:
+    async def reply_permission(
+        body: PermissionReplyRequest, state: State
+    ) -> dict[str, str]:
         if body.decision == PermissionAction.ASK:
-            raise HTTPException(status_code=400, detail="decision must be 'allow' or 'deny'")
+            raise HTTPException(
+                status_code=400, detail="decision must be 'allow' or 'deny'"
+            )
         state.permissions.reply(
             request_id=body.request_id,
             decision=body.decision,
@@ -488,6 +513,7 @@ def create_app(
     @app.get("/events")
     async def global_events(state: State) -> EventSourceResponse:
         """Stream all bus events as SSE."""
+
         async def stream() -> AsyncGenerator[dict[str, Any], None]:
             async with state.bus.subscribe() as events:
                 async for event in events:
@@ -501,6 +527,7 @@ def create_app(
     @app.get("/events/{session_id}")
     async def session_events(session_id: str, state: State) -> EventSourceResponse:
         """Stream bus events filtered to one session."""
+
         async def stream() -> AsyncGenerator[dict[str, Any], None]:
             async with state.bus.subscribe() as events:
                 async for event in events:
@@ -519,7 +546,11 @@ def create_app(
     @app.get("/tool")
     async def list_tools(state: State) -> list[dict[str, Any]]:
         return [
-            {"name": t.name, "description": t.description, "parameters": t.parameters_schema()}
+            {
+                "name": t.name,
+                "description": t.description,
+                "parameters": t.parameters_schema(),
+            }
             for t in state.registry.all()
         ]
 
@@ -529,6 +560,7 @@ def create_app(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 async def _make_event_stream(
     coro: Any,
@@ -542,7 +574,10 @@ async def _make_event_stream(
     turn and updates ``_pending_permissions`` from ``PermissionRequestedEvent``
     and ``PermissionRepliedEvent`` bus events.
     """
-    from openvibe.permission.permission import PermissionRequestedEvent, PermissionRepliedEvent
+    from openvibe.permission.permission import (
+        PermissionRequestedEvent,
+        PermissionRepliedEvent,
+    )
     from openvibe.session.models import TurnCompletedEvent
 
     _active_aborts[session_id] = abort
@@ -583,6 +618,7 @@ def _serialize_event(event: Any) -> str:
     """Convert a bus event dataclass to a JSON string."""
     try:
         from dataclasses import asdict, fields
+
         d = asdict(event) if hasattr(event, "__dataclass_fields__") else {}
         # Include nested Pydantic models
         return json.dumps(d, default=str)

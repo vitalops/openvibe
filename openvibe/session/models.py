@@ -26,10 +26,10 @@ from pydantic import BaseModel, Field
 
 from openvibe.config import MessageRole, ToolStateStatus
 
-
 # ---------------------------------------------------------------------------
 # Session
 # ---------------------------------------------------------------------------
+
 
 class SessionInfo(BaseModel):
     id: str
@@ -55,6 +55,7 @@ class SessionInfo(BaseModel):
 # Part types (discriminated union on `type`)
 # ---------------------------------------------------------------------------
 
+
 class TextPart(BaseModel):
     type: Literal["text"] = "text"
     content: str = ""
@@ -72,6 +73,7 @@ class ReasoningPart(BaseModel):
 
 class ToolState(BaseModel):
     """State machine for a single tool invocation."""
+
     status: ToolStateStatus = ToolStateStatus.PENDING
     # Populated when the call starts
     call_id: str = ""
@@ -92,11 +94,13 @@ class ToolPart(BaseModel):
 
 class StepStartPart(BaseModel):
     """Marker inserted at the beginning of each agent iteration."""
+
     type: Literal["step_start"] = "step_start"
 
 
 class CompactionPart(BaseModel):
     """Placeholder for a range of messages that have been summarised."""
+
     type: Literal["compaction"] = "compaction"
     summary: str = ""
     message_count: int = 0
@@ -111,6 +115,7 @@ MessagePart = Annotated[
 # ---------------------------------------------------------------------------
 # Messages
 # ---------------------------------------------------------------------------
+
 
 class MessageInfo(BaseModel):
     id: str
@@ -134,6 +139,7 @@ class MessageInfo(BaseModel):
 # ---------------------------------------------------------------------------
 # Error types
 # ---------------------------------------------------------------------------
+
 
 class APIError(BaseModel):
     type: Literal["api_error"] = "api_error"
@@ -226,6 +232,7 @@ class TurnCompletedEvent(Event):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()

@@ -18,8 +18,8 @@ from pathlib import Path
 
 @dataclass
 class FileEntry:
-    path: str           # project-relative path
-    hash: str           # SHA-256 hex digest
+    path: str  # project-relative path
+    hash: str  # SHA-256 hex digest
     size: int
     is_new: bool = False
     is_deleted: bool = False
@@ -50,6 +50,7 @@ class DiffSummary:
 # ---------------------------------------------------------------------------
 # Snapshot creation
 # ---------------------------------------------------------------------------
+
 
 def take_snapshot(base_dir: str, extensions: list[str] | None = None) -> Snapshot:
     """Walk *base_dir* and record a hash of every text file."""
@@ -92,7 +93,8 @@ def diff_snapshots(before: Snapshot, after: Snapshot) -> DiffSummary:
     summary.added = sorted(after_paths - before_paths)
     summary.deleted = sorted(before_paths - after_paths)
     summary.modified = sorted(
-        p for p in before_paths & after_paths
+        p
+        for p in before_paths & after_paths
         if before.files[p].hash != after.files[p].hash
     )
 
@@ -102,6 +104,7 @@ def diff_snapshots(before: Snapshot, after: Snapshot) -> DiffSummary:
 # ---------------------------------------------------------------------------
 # Revert support
 # ---------------------------------------------------------------------------
+
 
 def save_revert_snapshot(
     session_id: str,
@@ -116,7 +119,9 @@ def save_revert_snapshot(
     if data_dir is None:
         data_dir = Path.home() / ".openvibe"
 
-    archive_dir = data_dir / "snapshots" / session_id / snapshot.timestamp.replace(":", "-")
+    archive_dir = (
+        data_dir / "snapshots" / session_id / snapshot.timestamp.replace(":", "-")
+    )
     archive_dir.mkdir(parents=True, exist_ok=True)
 
     base = Path(base_dir)
@@ -154,7 +159,15 @@ def revert_to_snapshot(archive_dir: Path, base_dir: str) -> list[str]:
 # Helpers
 # ---------------------------------------------------------------------------
 
-_SKIP_DIRS = {".git", ".hg", "node_modules", "__pycache__", ".venv", "venv", ".mypy_cache"}
+_SKIP_DIRS = {
+    ".git",
+    ".hg",
+    "node_modules",
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".mypy_cache",
+}
 
 
 def _should_skip(path: Path) -> bool:

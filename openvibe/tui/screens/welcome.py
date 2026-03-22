@@ -10,7 +10,6 @@ from textual.widgets import Button, Label, ListItem, ListView, Static
 
 from openvibe import __version__
 
-
 _LOGO = r"""
  ██╗   ██╗██╗██████╗ ███████╗
  ██║   ██║██║██╔══██╗██╔════╝
@@ -186,4 +185,5 @@ class WelcomeScreen(Screen[None]):
 
     def _open_session(self, session_id: str) -> None:
         from openvibe.tui.screens.session import SessionScreen
+
         self.app.push_screen(SessionScreen(session_id))

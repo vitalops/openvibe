@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 # Exceptions
 # ---------------------------------------------------------------------------
 
+
 class PermissionDenied(Exception):
     """Raised when a ``deny`` rule matches a tool call."""
 
@@ -56,12 +57,15 @@ class PermissionRejected(Exception):
 # Events
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class PermissionRequestedEvent(Event):
     request_id: str = ""
     tool: str = ""
-    description: str = ""        # human-readable description of what the tool will do
-    argument: str | None = None  # the raw value being acted on (e.g. the command or path)
+    description: str = ""  # human-readable description of what the tool will do
+    argument: str | None = (
+        None  # the raw value being acted on (e.g. the command or path)
+    )
 
 
 @dataclass
@@ -75,11 +79,12 @@ class PermissionRepliedEvent(Event):
 # Rule model
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class Rule:
-    tool: str                               # exact name or glob
+    tool: str  # exact name or glob
     action: PermissionAction
-    pattern: str | None = None              # optional path/argument glob
+    pattern: str | None = None  # optional path/argument glob
 
 
 def _matches(rule: Rule, tool: str, argument: str | None = None) -> bool:
@@ -94,6 +99,7 @@ def _matches(rule: Rule, tool: str, argument: str | None = None) -> bool:
 # ---------------------------------------------------------------------------
 # Service
 # ---------------------------------------------------------------------------
+
 
 class PermissionService:
     """Evaluate permission rules and manage ask/reply lifecycle."""
@@ -114,14 +120,24 @@ class PermissionService:
             "SELECT tool, action, pattern FROM permissions WHERE project_id = ? ORDER BY rowid",
             (project_id,),
         )
-        return [Rule(tool=r["tool"], action=r["action"], pattern=r.get("pattern")) for r in rows]
+        return [
+            Rule(tool=r["tool"], action=r["action"], pattern=r.get("pattern"))
+            for r in rows
+        ]
 
     def save_rule(self, project_id: str, rule: Rule) -> None:
         now = datetime.now(timezone.utc).isoformat()
         self._db.execute(
             "INSERT INTO permissions (id, project_id, tool, pattern, action, created_at) "
             "VALUES (?,?,?,?,?,?)",
-            (f"perm_{uuid.uuid4().hex[:12]}", project_id, rule.tool, rule.pattern, rule.action, now),
+            (
+                f"perm_{uuid.uuid4().hex[:12]}",
+                project_id,
+                rule.tool,
+                rule.pattern,
+                rule.action,
+                now,
+            ),
         )
 
     # ------------------------------------------------------------------

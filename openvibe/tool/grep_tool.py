@@ -30,7 +30,9 @@ class GrepTool(Tool):
             default=None,
             description="Restrict search to files matching this glob (e.g. '*.py').",
         )
-        case_insensitive: bool = Field(default=False, description="Case-insensitive search.")
+        case_insensitive: bool = Field(
+            default=False, description="Case-insensitive search."
+        )
         fixed_strings: bool = Field(
             default=False, description="Treat pattern as a literal string, not a regex."
         )
@@ -59,7 +61,9 @@ class GrepTool(Tool):
         )
 
 
-def _try_ripgrep(params: "GrepTool.Params", search_path: str) -> tuple[list[str], str] | None:
+def _try_ripgrep(
+    params: "GrepTool.Params", search_path: str
+) -> tuple[list[str], str] | None:
     try:
         cmd = ["rg", "--line-number", "--no-heading", "--color=never"]
         if params.case_insensitive:
@@ -71,7 +75,9 @@ def _try_ripgrep(params: "GrepTool.Params", search_path: str) -> tuple[list[str]
         cmd += [params.pattern, search_path]
 
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        return result.stdout.splitlines(), result.stderr.strip() if result.returncode > 1 else ""
+        return result.stdout.splitlines(), (
+            result.stderr.strip() if result.returncode > 1 else ""
+        )
     except FileNotFoundError:
         return None  # rg not installed
     except subprocess.TimeoutExpired:
@@ -102,7 +108,9 @@ def _python_grep(params: "GrepTool.Params", search_path: str) -> tuple[list[str]
         if params.glob and not _fnmatch.fnmatch(path.name, params.glob):
             continue
         try:
-            for i, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            for i, line in enumerate(
+                path.read_text(encoding="utf-8", errors="replace").splitlines(), 1
+            ):
                 if compiled.search(line):
                     matches.append(f"{path}:{i}:{line}")
                     if len(matches) >= 500:

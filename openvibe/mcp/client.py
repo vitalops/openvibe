@@ -46,10 +46,17 @@ MCP_TIMEOUT = 30.0  # seconds
 # MCP-backed tool wrapper
 # ---------------------------------------------------------------------------
 
+
 class McpTool(Tool):
     """Wraps an MCP server tool as a first-class openvibe Tool."""
 
-    def __init__(self, server_name: str, tool_name: str, tool_description: str, schema: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        server_name: str,
+        tool_name: str,
+        tool_description: str,
+        schema: dict[str, Any],
+    ) -> None:
         self.name = f"mcp__{server_name}__{tool_name}"
         self.description = f"[{server_name}] {tool_description}"
         self._server_name = server_name
@@ -76,7 +83,9 @@ class McpTool(Tool):
             text = "\n".join(
                 block.text for block in result.content if hasattr(block, "text")
             )
-            return ToolResult(title=f"MCP: {self._tool_name}", output=text or "(no output)")
+            return ToolResult(
+                title=f"MCP: {self._tool_name}", output=text or "(no output)"
+            )
         except asyncio.TimeoutError:
             return ToolResult(
                 title=f"MCP: {self._tool_name}",
@@ -84,10 +93,15 @@ class McpTool(Tool):
                 error=True,
             )
         except Exception as exc:
-            return ToolResult(title=f"MCP: {self._tool_name}", output=str(exc), error=True)
+            return ToolResult(
+                title=f"MCP: {self._tool_name}", output=str(exc), error=True
+            )
 
-    async def __call__(self, ctx: ToolContext, raw_args: str | dict[str, Any]) -> ToolResult:
+    async def __call__(
+        self, ctx: ToolContext, raw_args: str | dict[str, Any]
+    ) -> ToolResult:
         import json
+
         if isinstance(raw_args, str):
             try:
                 args = json.loads(raw_args)
@@ -103,6 +117,7 @@ class McpTool(Tool):
 # Client manager
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class McpServerStatus:
     name: str
@@ -115,13 +130,11 @@ class McpClientManager:
     """Manages connections to all configured MCP servers."""
 
     def __init__(self) -> None:
-        self._connections: dict[str, Any] = {}   # name → (read, write, session) tuple
+        self._connections: dict[str, Any] = {}  # name → (read, write, session) tuple
         self._tools: list[McpTool] = []
         self._status: dict[str, McpServerStatus] = {}
 
-    async def connect_all(
-        self, configs: dict[str, "McpServerConfig"]
-    ) -> list[McpTool]:
+    async def connect_all(self, configs: dict[str, "McpServerConfig"]) -> list[McpTool]:
         """Connect to all configured MCP servers; return discovered tools."""
         tasks = [self._connect_one(name, cfg) for name, cfg in configs.items()]
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -154,7 +167,9 @@ class McpClientManager:
             from mcp.client.stdio import StdioServerParameters, stdio_client
 
             if not cfg.command:
-                raise ValueError(f"MCP server '{name}': 'command' is required for stdio type.")
+                raise ValueError(
+                    f"MCP server '{name}': 'command' is required for stdio type."
+                )
 
             params = StdioServerParameters(
                 command=cfg.command,
@@ -167,7 +182,9 @@ class McpClientManager:
             from mcp.client.sse import sse_client
 
             if not cfg.url:
-                raise ValueError(f"MCP server '{name}': 'url' is required for sse type.")
+                raise ValueError(
+                    f"MCP server '{name}': 'url' is required for sse type."
+                )
 
             read, write = await sse_client(cfg.url, headers=cfg.headers).__aenter__()
 

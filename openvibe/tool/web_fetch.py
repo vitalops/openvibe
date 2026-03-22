@@ -13,7 +13,9 @@ from openvibe.tool.base import MAX_OUTPUT_CHARS, Tool, ToolContext, ToolResult
 # Simple HTML tag stripper (good enough for most pages; no heavy dependencies)
 _TAG_RE = re.compile(r"<[^>]+>")
 _MULTI_NL = re.compile(r"\n{3,}")
-_SCRIPT_STYLE_RE = re.compile(r"<(script|style)[^>]*>.*?</\1>", re.DOTALL | re.IGNORECASE)
+_SCRIPT_STYLE_RE = re.compile(
+    r"<(script|style)[^>]*>.*?</\1>", re.DOTALL | re.IGNORECASE
+)
 
 
 def _html_to_text(html: str) -> str:
@@ -46,7 +48,9 @@ class WebFetchTool(Tool):
             description="Maximum characters to return.",
         )
 
-    async def execute(self, ctx: ToolContext, params: "WebFetchTool.Params") -> ToolResult:
+    async def execute(
+        self, ctx: ToolContext, params: "WebFetchTool.Params"
+    ) -> ToolResult:
         # Basic URL validation
         parsed = urlparse(params.url)
         if parsed.scheme not in ("http", "https"):
@@ -64,7 +68,9 @@ class WebFetchTool(Tool):
                 )
                 response.raise_for_status()
         except httpx.TimeoutException:
-            return ToolResult(title=f"Fetch {params.url}", output="Request timed out.", error=True)
+            return ToolResult(
+                title=f"Fetch {params.url}", output="Request timed out.", error=True
+            )
         except httpx.HTTPStatusError as exc:
             return ToolResult(
                 title=f"Fetch {params.url}",

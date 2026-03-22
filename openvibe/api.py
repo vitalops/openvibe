@@ -69,16 +69,18 @@ _PERMISSION_TIMEOUT = 300.0  # seconds a worker waits for a permission reply
 # Public types
 # ---------------------------------------------------------------------------
 
+
 class SessionState(StrEnum):
-    IDLE     = "idle"
+    IDLE = "idle"
     THINKING = "thinking"
-    WAITING  = "waiting"   # blocked on caller input (e.g. permission request)
-    ERROR    = "error"
+    WAITING = "waiting"  # blocked on caller input (e.g. permission request)
+    ERROR = "error"
 
 
 @dataclass
 class Option:
     """One selectable choice presented inside an InputRequest."""
+
     value: str
     label: str
 
@@ -86,17 +88,18 @@ class Option:
 @dataclass
 class InputRequest:
     """Emitted when the agent needs a decision from the caller."""
-    id:          str
-    kind:        str          # "permission" | "question" | …
+
+    id: str
+    kind: str  # "permission" | "question" | …
     description: str
-    tool:        str | None   = None   # tool name for permission requests
-    argument:    str | None   = None   # raw value being acted on (command, path, …)
-    options:     list[Option] = field(default_factory=list)
+    tool: str | None = None  # tool name for permission requests
+    argument: str | None = None  # raw value being acted on (command, path, …)
+    options: list[Option] = field(default_factory=list)
 
 
 @dataclass
 class ErrorInfo:
-    kind:    str   # "auth" | "context_overflow" | "api_error" | "internal"
+    kind: str  # "auth" | "context_overflow" | "api_error" | "internal"
     message: str
 
 
@@ -110,11 +113,12 @@ class Response:
     * ``WAITING`` — agent needs input; handle ``.request`` then call reply().
     * ``ERROR``   — something went wrong; inspect ``.error``.
     """
-    state:    SessionState
-    text:     str                 = ""
-    messages: list[Any]           = field(default_factory=list)  # list[MessageInfo]
-    request:  InputRequest | None = None
-    error:    ErrorInfo    | None = None
+
+    state: SessionState
+    text: str = ""
+    messages: list[Any] = field(default_factory=list)  # list[MessageInfo]
+    request: InputRequest | None = None
+    error: ErrorInfo | None = None
 
 
 class InvalidStateError(Exception):
@@ -124,6 +128,7 @@ class InvalidStateError(Exception):
 # ---------------------------------------------------------------------------
 # Session
 # ---------------------------------------------------------------------------
+
 
 class Session:
     """A single conversation thread with explicit FSM state.
@@ -144,27 +149,27 @@ class Session:
 
     def __init__(
         self,
-        session_info: Any,   # openvibe.session.models.SessionInfo
-        db: Any,             # openvibe.db.Database
-        registry: Any,       # openvibe.tool.base.ToolRegistry
-        config: Any,         # openvibe.config.Config
+        session_info: Any,  # openvibe.session.models.SessionInfo
+        db: Any,  # openvibe.db.Database
+        registry: Any,  # openvibe.tool.base.ToolRegistry
+        config: Any,  # openvibe.config.Config
         agent_name: str,
-        llm: Any = None,     # sync callable(model, messages, **kw) → iterable[chunk]
-        processor: Any = None,   # openvibe.session.processor.SessionProcessor (async path)
-        bus: Any = None,         # openvibe.bus.EventBus (async path)
-        permissions: Any = None, # openvibe.permission.permission.PermissionService (async path)
+        llm: Any = None,  # sync callable(model, messages, **kw) → iterable[chunk]
+        processor: Any = None,  # openvibe.session.processor.SessionProcessor (async path)
+        bus: Any = None,  # openvibe.bus.EventBus (async path)
+        permissions: Any = None,  # openvibe.permission.permission.PermissionService (async path)
     ) -> None:
-        self._info       = session_info
-        self._db         = db
-        self._registry   = registry
-        self._config     = config
+        self._info = session_info
+        self._db = db
+        self._registry = registry
+        self._config = config
         self._agent_name = agent_name
-        self._llm        = llm
-        self._processor  = processor
-        self._bus        = bus
+        self._llm = llm
+        self._processor = processor
+        self._bus = bus
         self._permissions = permissions
-        self._state      = SessionState.IDLE
-        self._lock       = threading.Lock()
+        self._state = SessionState.IDLE
+        self._lock = threading.Lock()
 
         # Stored callbacks — set by send/send_nowait, reused by reply/reply_nowait
         self._on_message: Callable[[str, str], None] | None = None
@@ -173,10 +178,10 @@ class Session:
         # Worker ↔ caller communication channels
         # result_q: worker → caller (one Response per pause or completion)
         # resume_q: caller → worker ((request_id, option) to unblock a WAITING worker)
-        self._result_q: queue.Queue[Response]          = queue.Queue(maxsize=1)
-        self._resume_q: queue.Queue[tuple[str, str]]   = queue.Queue(maxsize=1)
-        self._abort_ev                                 = threading.Event()
-        self._worker: threading.Thread | None          = None
+        self._result_q: queue.Queue[Response] = queue.Queue(maxsize=1)
+        self._resume_q: queue.Queue[tuple[str, str]] = queue.Queue(maxsize=1)
+        self._abort_ev = threading.Event()
+        self._worker: threading.Thread | None = None
 
     # ------------------------------------------------------------------
     # Introspection (always safe to call from any thread)
@@ -196,6 +201,7 @@ class Session:
 
     def messages(self) -> list[Any]:  # list[MessageInfo]
         from openvibe.session import session as _store
+
         return _store.list_messages(self._db, self._info.id)
 
     # ------------------------------------------------------------------
@@ -228,7 +234,7 @@ class Session:
             self._abort_ev.clear()
 
         self._on_message = on_message
-        self._on_tool    = on_tool
+        self._on_tool = on_tool
         self._launch_worker(text, on_token, callback=None)
         return self._collect()
 
@@ -259,10 +265,10 @@ class Session:
     def send_nowait(
         self,
         text: str,
-        callback:   Callable[[Response], None]         | None = None,
-        on_token:   Callable[[str], None]              | None = None,
-        on_message: Callable[[str, str], None]         | None = None,
-        on_tool:    Callable[[str, int, Any], None]    | None = None,
+        callback: Callable[[Response], None] | None = None,
+        on_token: Callable[[str], None] | None = None,
+        on_message: Callable[[str, str], None] | None = None,
+        on_tool: Callable[[str, int, Any], None] | None = None,
     ) -> None:
         """Send *text* and return immediately (state → THINKING).
 
@@ -278,7 +284,7 @@ class Session:
             self._abort_ev.clear()
 
         self._on_message = on_message
-        self._on_tool    = on_tool
+        self._on_tool = on_tool
         self._launch_worker(text, on_token, callback=callback)
 
     def reply_nowait(
@@ -286,7 +292,7 @@ class Session:
         request_id: str,
         option: str,
         callback: Callable[[Response], None] | None = None,
-        on_token: Callable[[str], None]      | None = None,  # noqa: ARG002
+        on_token: Callable[[str], None] | None = None,  # noqa: ARG002
     ) -> None:
         """Reply to a pending request and return immediately.
 
@@ -334,6 +340,7 @@ class Session:
             self._abort_ev.clear()
 
         from openvibe.agent.agent import resolve as _resolve
+
         agent = _resolve(self._config, self._agent_name)
 
         self._on_message = on_message
@@ -341,10 +348,20 @@ class Session:
         self._worker = threading.Thread(
             target=_run_interrupted_async_threaded,
             args=(
-                allow, on_token, on_message, on_tool, None,
-                self._info, agent, self._db,
-                self._processor, self._bus, self._permissions,
-                self._result_q, self._resume_q, self._abort_ev,
+                allow,
+                on_token,
+                on_message,
+                on_tool,
+                None,
+                self._info,
+                agent,
+                self._db,
+                self._processor,
+                self._bus,
+                self._permissions,
+                self._result_q,
+                self._resume_q,
+                self._abort_ev,
             ),
             daemon=True,
             name=f"openvibe-resume-{self._info.id[:8]}",
@@ -381,6 +398,7 @@ class Session:
         callback: Callable[[Response], None] | None,
     ) -> None:
         from openvibe.agent.agent import resolve as _resolve
+
         agent = _resolve(self._config, self._agent_name)
 
         if self._processor is not None:
@@ -388,10 +406,20 @@ class Session:
             self._worker = threading.Thread(
                 target=_run_turn_async_threaded,
                 args=(
-                    text, on_token, self._on_message, self._on_tool, callback,
-                    self._info, agent, self._db,
-                    self._processor, self._bus, self._permissions,
-                    self._result_q, self._resume_q, self._abort_ev,
+                    text,
+                    on_token,
+                    self._on_message,
+                    self._on_tool,
+                    callback,
+                    self._info,
+                    agent,
+                    self._db,
+                    self._processor,
+                    self._bus,
+                    self._permissions,
+                    self._result_q,
+                    self._resume_q,
+                    self._abort_ev,
                 ),
                 daemon=True,
                 name=f"openvibe-worker-{self._info.id[:8]}",
@@ -401,9 +429,16 @@ class Session:
             self._worker = threading.Thread(
                 target=_run_turn,
                 args=(
-                    text, on_token, callback,
-                    self._info, agent, self._db, self._registry,
-                    self._result_q, self._resume_q, self._abort_ev,
+                    text,
+                    on_token,
+                    callback,
+                    self._info,
+                    agent,
+                    self._db,
+                    self._registry,
+                    self._result_q,
+                    self._resume_q,
+                    self._abort_ev,
                     self._llm,
                 ),
                 daemon=True,
@@ -430,6 +465,7 @@ class Session:
 # OpenVibe
 # ---------------------------------------------------------------------------
 
+
 class OpenVibe:
     """Top-level handle; create once and reuse across sessions.
 
@@ -452,21 +488,21 @@ class OpenVibe:
     def __init__(
         self,
         project_dir: Path | None = None,
-        config: Any | None = None,   # openvibe.config.Config
-        db: Any | None = None,       # Database — inject for testing
-        llm: Any | None = None,      # sync LLM callable — inject for testing
+        config: Any | None = None,  # openvibe.config.Config
+        db: Any | None = None,  # Database — inject for testing
+        llm: Any | None = None,  # sync LLM callable — inject for testing
     ) -> None:
         self._project_dir = (project_dir or Path.cwd()).resolve()
-        self._config      = config
-        self._db: Any     = db       # None means create on start()
-        self._llm: Any    = llm      # None means use litellm
+        self._config = config
+        self._db: Any = db  # None means create on start()
+        self._llm: Any = llm  # None means use litellm
         self._registry: Any = None
-        self._project: Any  = None
-        self._mcp: Any      = None   # McpClientManager — kept alive to prevent GC
+        self._project: Any = None
+        self._mcp: Any = None  # McpClientManager — kept alive to prevent GC
         # Async-path components (populated by start_async())
-        self._bus: Any         = None
+        self._bus: Any = None
         self._permissions: Any = None
-        self._processor: Any   = None
+        self._processor: Any = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -485,7 +521,7 @@ class OpenVibe:
         if self._db is None:
             self._db = create_database()
         self._registry = create_default_registry()
-        self._project  = _project_module.get_or_create(self._db, self._project_dir)
+        self._project = _project_module.get_or_create(self._db, self._project_dir)
 
         if self._config.mcp:
             self._init_mcp()
@@ -527,8 +563,8 @@ class OpenVibe:
             self._db = create_database()
 
         llm = self._llm or create_default_backend()
-        self._bus         = EventBus()
-        self._registry    = create_default_registry()
+        self._bus = EventBus()
+        self._registry = create_default_registry()
         self._permissions = PermissionService(self._db, self._bus)
 
         mcp = McpClientManager()
@@ -538,7 +574,7 @@ class OpenVibe:
                 self._registry.register(tool)
         self._mcp = mcp
 
-        self._project   = _project_module.get_or_create(self._db, self._project_dir)
+        self._project = _project_module.get_or_create(self._db, self._project_dir)
         self._processor = SessionProcessor(
             self._db, llm, self._bus, self._registry, self._permissions
         )
@@ -569,6 +605,7 @@ class OpenVibe:
     def list_sessions(self) -> list[Any]:  # list[SessionInfo]
         self._require_started()
         from openvibe.session import session as _store
+
         return _store.list_sessions(self._db, self._project.id)
 
     def create_session(
@@ -578,6 +615,7 @@ class OpenVibe:
     ) -> Session:
         self._require_started()
         from openvibe.session import session as _store
+
         info = _store.create(
             self._db,
             project_id=self._project.id,
@@ -585,24 +623,40 @@ class OpenVibe:
             title=title,
         )
         return Session(
-            info, self._db, self._registry, self._config, agent, self._llm,
-            processor=self._processor, bus=self._bus, permissions=self._permissions,
+            info,
+            self._db,
+            self._registry,
+            self._config,
+            agent,
+            self._llm,
+            processor=self._processor,
+            bus=self._bus,
+            permissions=self._permissions,
         )
 
     def get_session(self, session_id: str, agent: str = "build") -> Session:
         self._require_started()
         from openvibe.session import session as _store
+
         info = _store.get(self._db, session_id)
         if info is None:
             raise KeyError(f"Session not found: {session_id!r}")
         return Session(
-            info, self._db, self._registry, self._config, agent, self._llm,
-            processor=self._processor, bus=self._bus, permissions=self._permissions,
+            info,
+            self._db,
+            self._registry,
+            self._config,
+            agent,
+            self._llm,
+            processor=self._processor,
+            bus=self._bus,
+            permissions=self._permissions,
         )
 
     def delete_session(self, session_id: str) -> None:
         self._require_started()
         from openvibe.session import session as _store
+
         _store.archive(self._db, session_id)
 
     # ------------------------------------------------------------------
@@ -656,6 +710,7 @@ class OpenVibe:
         """Run MCP async initialisation once (blocks, then stores tools)."""
         import asyncio
         from openvibe.mcp.client import McpClientManager
+
         mcp = McpClientManager()
         try:
             tools = asyncio.run(mcp.connect_all(self._config.mcp))
@@ -669,6 +724,7 @@ class OpenVibe:
 # ---------------------------------------------------------------------------
 # Async worker — runs in a background thread via asyncio.run()
 # ---------------------------------------------------------------------------
+
 
 def _run_turn_async_threaded(
     text: str,
@@ -688,15 +744,26 @@ def _run_turn_async_threaded(
 ) -> None:
     """Spawn a fresh event loop in this thread and run the async processor."""
     import asyncio
+
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
         loop.run_until_complete(
             _run_turn_async(
-                text, on_token, on_message, on_tool, callback,
-                session_info, agent, db,
-                processor, bus, permissions,
-                result_q, resume_q, abort_ev,
+                text,
+                on_token,
+                on_message,
+                on_tool,
+                callback,
+                session_info,
+                agent,
+                db,
+                processor,
+                bus,
+                permissions,
+                result_q,
+                resume_q,
+                abort_ev,
             )
         )
     finally:
@@ -805,7 +872,9 @@ async def _run_turn_async(
 
                     elif isinstance(event, ToolStateChangedEvent):
                         if on_tool:
-                            on_tool(event.message_id, event.part_index, event.state or {})
+                            on_tool(
+                                event.message_id, event.part_index, event.state or {}
+                            )
 
                     elif isinstance(event, PermissionRequestedEvent):
                         req = InputRequest(
@@ -815,18 +884,20 @@ async def _run_turn_async(
                             tool=event.tool,
                             argument=event.argument,
                             options=[
-                                Option("allow",        "Allow once"),
+                                Option("allow", "Allow once"),
                                 Option("allow_always", "Always allow"),
-                                Option("deny",         "Deny"),
+                                Option("deny", "Deny"),
                             ],
                         )
                         messages = _store.list_messages(db, session_info.id)
-                        result_q.put(Response(
-                            state=SessionState.WAITING,
-                            text=accumulated_text,
-                            messages=messages,
-                            request=req,
-                        ))
+                        result_q.put(
+                            Response(
+                                state=SessionState.WAITING,
+                                text=accumulated_text,
+                                messages=messages,
+                                request=req,
+                            )
+                        )
 
                         # Wait for the caller's reply without blocking this event loop.
                         loop = _asyncio.get_running_loop()
@@ -883,6 +954,7 @@ async def _run_turn_async(
 # Interrupted-resume async worker
 # ---------------------------------------------------------------------------
 
+
 def _run_interrupted_async_threaded(
     allow: bool,
     on_token: Callable[[str], None] | None,
@@ -900,15 +972,26 @@ def _run_interrupted_async_threaded(
     abort_ev: threading.Event,
 ) -> None:
     import asyncio
+
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
         loop.run_until_complete(
             _run_interrupted_async(
-                allow, on_token, on_message, on_tool, callback,
-                session_info, agent, db,
-                processor, bus, permissions,
-                result_q, resume_q, abort_ev,
+                allow,
+                on_token,
+                on_message,
+                on_tool,
+                callback,
+                session_info,
+                agent,
+                db,
+                processor,
+                bus,
+                permissions,
+                result_q,
+                resume_q,
+                abort_ev,
             )
         )
     finally:
@@ -965,7 +1048,9 @@ async def _run_interrupted_async(
             success = False
             try:
                 await subscribed.wait()
-                await processor.resume_interrupted(session_info, agent, allow, abort_async)
+                await processor.resume_interrupted(
+                    session_info, agent, allow, abort_async
+                )
                 success = True
             except Exception as exc:  # noqa: BLE001
                 exc_to_raise = exc
@@ -1000,7 +1085,9 @@ async def _run_interrupted_async(
 
                     elif isinstance(event, ToolStateChangedEvent):
                         if on_tool:
-                            on_tool(event.message_id, event.part_index, event.state or {})
+                            on_tool(
+                                event.message_id, event.part_index, event.state or {}
+                            )
 
                     elif isinstance(event, PermissionRequestedEvent):
                         req = InputRequest(
@@ -1010,18 +1097,20 @@ async def _run_interrupted_async(
                             tool=event.tool,
                             argument=event.argument,
                             options=[
-                                Option("allow",        "Allow once"),
+                                Option("allow", "Allow once"),
                                 Option("allow_always", "Always allow"),
-                                Option("deny",         "Deny"),
+                                Option("deny", "Deny"),
                             ],
                         )
                         messages = _store.list_messages(db, session_info.id)
-                        result_q.put(Response(
-                            state=SessionState.WAITING,
-                            text=accumulated_text,
-                            messages=messages,
-                            request=req,
-                        ))
+                        result_q.put(
+                            Response(
+                                state=SessionState.WAITING,
+                                text=accumulated_text,
+                                messages=messages,
+                                request=req,
+                            )
+                        )
 
                         loop = _asyncio.get_running_loop()
                         _req_id, option = await loop.run_in_executor(None, resume_q.get)
@@ -1076,14 +1165,15 @@ async def _run_interrupted_async(
 # Sync worker — runs entirely in a background thread
 # ---------------------------------------------------------------------------
 
+
 def _run_turn(
     text: str,
     on_token: Callable[[str], None] | None,
     callback: Callable[[Response], None] | None,
     session_info: Any,
-    agent: Any,       # AgentInfo
-    db: Any,          # Database
-    registry: Any,    # ToolRegistry
+    agent: Any,  # AgentInfo
+    db: Any,  # Database
+    registry: Any,  # ToolRegistry
     result_q: "queue.Queue[Response]",
     resume_q: "queue.Queue[tuple[str, str]]",
     abort_ev: threading.Event,
@@ -1125,7 +1215,7 @@ def _run_turn(
         ]
 
         # 3. Resolved permission rules and system prompt
-        rules        = list(agent.permission_rules)
+        rules = list(agent.permission_rules)
         system_prompt = _build_system_prompt(agent)
 
         doom_counts: dict[str, int] = {}
@@ -1136,15 +1226,17 @@ def _run_turn(
                 break
 
             # Reload full history so tool results from the last step are visible
-            history    = _store.list_messages(db, session_info.id)
+            history = _store.list_messages(db, session_info.id)
             ll_messages = _messages_to_litellm(history)
             if system_prompt:
-                ll_messages = [{"role": "system", "content": system_prompt}] + ll_messages
+                ll_messages = [
+                    {"role": "system", "content": system_prompt}
+                ] + ll_messages
 
             # Create the assistant message shell for this step
-            asst_msg   = _store.add_message(db, session_info.id, MessageRole.ASSISTANT)
-            part_index = 0      # next free part slot on asst_msg
-            step_text  = ""
+            asst_msg = _store.add_message(db, session_info.id, MessageRole.ASSISTANT)
+            part_index = 0  # next free part slot on asst_msg
+            step_text = ""
 
             # Pending tool calls accumulated across stream chunks: index → state
             pending: dict[int, dict[str, Any]] = {}
@@ -1162,6 +1254,7 @@ def _run_turn(
                 _llm_call = llm
             else:
                 import litellm  # lazy — keeps startup fast and tests free
+
                 _llm_call = litellm.completion
             stream = _llm_call(
                 model=_model_string(agent),
@@ -1174,11 +1267,11 @@ def _run_turn(
                     break
 
                 choice = chunk.choices[0]
-                delta  = choice.delta
+                delta = choice.delta
 
                 # Text token
                 if delta.content:
-                    step_text        += delta.content
+                    step_text += delta.content
                     accumulated_text += delta.content
                     if on_token:
                         on_token(delta.content)
@@ -1206,7 +1299,8 @@ def _run_turn(
                     usage = getattr(chunk, "usage", None)
                     if usage:
                         _store.update_cost(
-                            db, session_info.id,
+                            db,
+                            session_info.id,
                             cost=0.0,
                             input_tokens=getattr(usage, "prompt_tokens", 0),
                             output_tokens=getattr(usage, "completion_tokens", 0),
@@ -1228,9 +1322,9 @@ def _run_turn(
                 if abort_ev.is_set():
                     break
 
-                name     = tc_data["name"]
+                name = tc_data["name"]
                 args_str = tc_data["args"]
-                call_id  = tc_data["id"]
+                call_id = tc_data["id"]
 
                 try:
                     args = json.loads(args_str) if args_str.strip() else {}
@@ -1242,9 +1336,14 @@ def _run_turn(
                 doom_counts[doom_key] = doom_counts.get(doom_key, 0) + 1
                 if doom_counts[doom_key] >= _DOOM_THRESHOLD:
                     _persist_tool_call(
-                        db, asst_msg.id, part_index, call_id, name, args,
+                        db,
+                        asst_msg.id,
+                        part_index,
+                        call_id,
+                        name,
+                        args,
                         output=f"Doom loop: '{name}' called {doom_counts[doom_key]}× "
-                               f"with identical arguments.",
+                        f"with identical arguments.",
                         error=True,
                         status=ToolStateStatus.ERROR,
                     )
@@ -1253,16 +1352,26 @@ def _run_turn(
 
                 # Permission check
                 decision = _check_permission(
-                    name, args, rules,
-                    session_info, accumulated_text,
+                    name,
+                    args,
+                    rules,
+                    session_info,
+                    accumulated_text,
                     _store.list_messages(db, session_info.id),
-                    result_q, resume_q, abort_ev,
+                    result_q,
+                    resume_q,
+                    abort_ev,
                 )
                 if decision == "abort":
                     break
                 if decision == "deny":
                     _persist_tool_call(
-                        db, asst_msg.id, part_index, call_id, name, args,
+                        db,
+                        asst_msg.id,
+                        part_index,
+                        call_id,
+                        name,
+                        args,
                         output="Permission denied.",
                         error=True,
                         status=ToolStateStatus.ERROR,
@@ -1274,7 +1383,12 @@ def _run_turn(
                 tool = registry.get(name)
                 if tool is None:
                     _persist_tool_call(
-                        db, asst_msg.id, part_index, call_id, name, args,
+                        db,
+                        asst_msg.id,
+                        part_index,
+                        call_id,
+                        name,
+                        args,
                         output=f"Unknown tool: '{name}'.",
                         error=True,
                         status=ToolStateStatus.ERROR,
@@ -1282,13 +1396,23 @@ def _run_turn(
                     part_index += 1
                     continue
 
-                result = _call_tool_sync(tool, session_info, asst_msg.id, agent.name,
-                                         abort_ev, args, db)
+                result = _call_tool_sync(
+                    tool, session_info, asst_msg.id, agent.name, abort_ev, args, db
+                )
                 _persist_tool_call(
-                    db, asst_msg.id, part_index, call_id, name, args,
+                    db,
+                    asst_msg.id,
+                    part_index,
+                    call_id,
+                    name,
+                    args,
                     output=result.output,
                     error=result.error,
-                    status=ToolStateStatus.ERROR if result.error else ToolStateStatus.COMPLETED,
+                    status=(
+                        ToolStateStatus.ERROR
+                        if result.error
+                        else ToolStateStatus.COMPLETED
+                    ),
                 )
                 part_index += 1
 
@@ -1317,10 +1441,11 @@ def _run_turn(
 # Worker helpers
 # ---------------------------------------------------------------------------
 
+
 def _check_permission(
     name: str,
     args: dict[str, Any],
-    rules: list[Any],           # list[openvibe.permission.permission.Rule]
+    rules: list[Any],  # list[openvibe.permission.permission.Rule]
     session_info: Any,
     accumulated_text: str,
     messages: list[Any],
@@ -1348,17 +1473,19 @@ def _check_permission(
         kind="permission",
         description=f"Allow tool '{name}' to run?",
         options=[
-            Option("allow",        "Allow once"),
+            Option("allow", "Allow once"),
             Option("allow_always", "Always allow"),
-            Option("deny",         "Deny"),
+            Option("deny", "Deny"),
         ],
     )
-    result_q.put(Response(
-        state=SessionState.WAITING,
-        text=accumulated_text,
-        messages=messages,
-        request=request,
-    ))
+    result_q.put(
+        Response(
+            state=SessionState.WAITING,
+            text=accumulated_text,
+            messages=messages,
+            request=request,
+        )
+    )
 
     try:
         _req_id, option = resume_q.get(timeout=_PERMISSION_TIMEOUT)
@@ -1401,6 +1528,7 @@ def _call_tool_sync(
         return asyncio.run(tool(ctx, args))
     except Exception as exc:
         from openvibe.tool.base import ToolResult
+
         return ToolResult(title=f"Error in {tool.name}", output=str(exc), error=True)
 
 
@@ -1418,14 +1546,17 @@ def _persist_tool_call(
     """Write a ToolPart (call + result) to the parts table."""
     from openvibe.session import session as _store
     from openvibe.session.models import ToolPart, ToolState
-    part = ToolPart(state=ToolState(
-        status=status,
-        call_id=call_id,
-        tool_name=tool_name,
-        input=input_args,
-        output=output,
-        error=output if error else None,
-    ))
+
+    part = ToolPart(
+        state=ToolState(
+            status=status,
+            call_id=call_id,
+            tool_name=tool_name,
+            input=input_args,
+            output=output,
+            error=output if error else None,
+        )
+    )
     _store.upsert_part(db, msg_id, part_index, part)
 
 
@@ -1455,8 +1586,7 @@ def _messages_to_litellm(messages: list[Any]) -> list[dict[str, Any]]:
         # ASSISTANT message
         text_parts = [p for p in msg.parts if isinstance(p, TextPart)]
         tool_parts = [
-            p for p in msg.parts
-            if isinstance(p, ToolPart) and p.state.call_id
+            p for p in msg.parts if isinstance(p, ToolPart) and p.state.call_id
         ]
 
         if not text_parts and not tool_parts:
@@ -1489,11 +1619,13 @@ def _messages_to_litellm(messages: list[Any]) -> list[dict[str, Any]]:
                 if p.state.output is not None
                 else "Tool execution was interrupted (session was closed before the tool completed)."
             )
-            result.append({
-                "role": "tool",
-                "tool_call_id": p.state.call_id,
-                "content": content,
-            })
+            result.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": p.state.call_id,
+                    "content": content,
+                }
+            )
 
     return result
 

@@ -39,7 +39,11 @@ class BashTool(Tool):
         )
 
         if ctx.abort.is_set():
-            return ToolResult(title="Aborted", output="Command cancelled before execution.", error=True)
+            return ToolResult(
+                title="Aborted",
+                output="Command cancelled before execution.",
+                error=True,
+            )
 
         try:
             proc = await asyncio.create_subprocess_shell(

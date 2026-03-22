@@ -20,10 +20,10 @@ from openvibe.db import create_database
 from openvibe.llm import LLMEvent, StreamDone, TextDelta
 from openvibe.server import _serialize_event, create_app
 
-
 # ---------------------------------------------------------------------------
 # Fake async LLM backend
 # ---------------------------------------------------------------------------
+
 
 class _FakeLLM:
     """Immediately yields a fixed text response with no tool calls."""
@@ -45,6 +45,7 @@ class _FakeLLM:
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def client(tmp_path: Path):
     db = create_database(tmp_path / "test.db")
@@ -64,6 +65,7 @@ def _create_session(client: TestClient, **kwargs: Any) -> dict:
 # Health
 # ---------------------------------------------------------------------------
 
+
 def test_health(client: TestClient) -> None:
     resp = client.get("/health")
     assert resp.status_code == 200
@@ -73,6 +75,7 @@ def test_health(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 # Session CRUD
 # ---------------------------------------------------------------------------
+
 
 def test_create_session_returns_session_info(client: TestClient) -> None:
     resp = client.post("/session", json={})
@@ -169,6 +172,7 @@ def test_get_messages_not_found(client: TestClient) -> None:
 # Send message (SSE)
 # ---------------------------------------------------------------------------
 
+
 def test_send_message_not_found(client: TestClient) -> None:
     resp = client.post("/session/nonexistent/message", json={"text": "hi"})
     assert resp.status_code == 404
@@ -215,6 +219,7 @@ def test_send_message_user_text_stored(client: TestClient) -> None:
 # Provider / model routes
 # ---------------------------------------------------------------------------
 
+
 def test_list_providers(client: TestClient) -> None:
     resp = client.get("/provider")
     assert resp.status_code == 200
@@ -250,6 +255,7 @@ def test_list_all_models(client: TestClient) -> None:
 # Config
 # ---------------------------------------------------------------------------
 
+
 def test_get_config_returns_dict(client: TestClient) -> None:
     resp = client.get("/config")
     assert resp.status_code == 200
@@ -280,6 +286,7 @@ def test_get_config_null_api_key_not_changed(tmp_path: Path) -> None:
 # MCP
 # ---------------------------------------------------------------------------
 
+
 def test_get_mcp_status(client: TestClient) -> None:
     resp = client.get("/mcp")
     assert resp.status_code == 200
@@ -292,6 +299,7 @@ def test_get_mcp_status(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 # Permission reply
 # ---------------------------------------------------------------------------
+
 
 def test_reply_permission_allow(client: TestClient) -> None:
     resp = client.post(
@@ -350,6 +358,7 @@ from unittest.mock import patch as _mock_patch
 @asynccontextmanager
 async def _empty_bus_subscribe(self):  # type: ignore[override]
     """Finite substitute for EventBus.subscribe() — yields zero events."""
+
     async def _gen():
         return
         yield  # pragma: no cover  (makes this an async generator)
@@ -412,6 +421,7 @@ def test_session_events_filtered_to_session_id(client: TestClient) -> None:
 # Tools
 # ---------------------------------------------------------------------------
 
+
 def test_list_tools(client: TestClient) -> None:
     resp = client.get("/tool")
     assert resp.status_code == 200
@@ -436,6 +446,7 @@ def test_list_tools_schema_fields(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 # _serialize_event helper
 # ---------------------------------------------------------------------------
+
 
 def test_serialize_event_dataclass() -> None:
     from dataclasses import dataclass
@@ -490,6 +501,7 @@ def test_serialize_event_handles_non_serialisable_field() -> None:
 # ---------------------------------------------------------------------------
 # GET /session/{id}/state
 # ---------------------------------------------------------------------------
+
 
 def test_get_session_state_idle(client: TestClient) -> None:
     created = _create_session(client)
@@ -550,6 +562,7 @@ def test_get_session_state_after_send_becomes_idle(client: TestClient) -> None:
 # POST /session/{id}/abort
 # ---------------------------------------------------------------------------
 
+
 def test_abort_no_active_turn(client: TestClient) -> None:
     created = _create_session(client)
     resp = client.post(f"/session/{created['id']}/abort")
@@ -565,6 +578,7 @@ def test_abort_not_found(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 # POST /session/{id}/resume
 # ---------------------------------------------------------------------------
+
 
 def test_resume_not_found(client: TestClient) -> None:
     resp = client.post("/session/nonexistent/resume", json={"allow": True})
@@ -593,7 +607,9 @@ def test_resume_allow_streams_sse(tmp_path: Path) -> None:
         sid = created["id"]
 
         # Seed history: user message + interrupted assistant tool call.
-        session_store.add_message(db, sid, MessageRole.USER, [TextPart(content="run ls")])
+        session_store.add_message(
+            db, sid, MessageRole.USER, [TextPart(content="run ls")]
+        )
         tool_part = ToolPart(
             state=ToolState(
                 status=ToolStateStatus.RUNNING,
@@ -626,7 +642,9 @@ def test_resume_deny_streams_sse(tmp_path: Path) -> None:
         created = _create_session(c)
         sid = created["id"]
 
-        session_store.add_message(db, sid, MessageRole.USER, [TextPart(content="run ls")])
+        session_store.add_message(
+            db, sid, MessageRole.USER, [TextPart(content="run ls")]
+        )
         tool_part = ToolPart(
             state=ToolState(
                 status=ToolStateStatus.RUNNING,
@@ -658,7 +676,9 @@ def test_resume_marks_tool_completed_in_db(tmp_path: Path) -> None:
         created = _create_session(c)
         sid = created["id"]
 
-        session_store.add_message(db, sid, MessageRole.USER, [TextPart(content="run ls")])
+        session_store.add_message(
+            db, sid, MessageRole.USER, [TextPart(content="run ls")]
+        )
         tool_part = ToolPart(
             state=ToolState(
                 status=ToolStateStatus.RUNNING,
@@ -681,6 +701,7 @@ def test_resume_marks_tool_completed_in_db(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 # _serialize_event helper (continued)
 # ---------------------------------------------------------------------------
+
 
 def test_serialize_event_bus_event() -> None:
     from openvibe.session.models import SessionCreatedEvent

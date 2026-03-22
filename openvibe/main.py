@@ -48,6 +48,7 @@ DEFAULT_HOST = os.environ.get("OPENVIBE_HOST", "127.0.0.1")
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _get_project_dir() -> Path:
     env = os.environ.get("OPENVIBE_PROJECT_DIR")
     return Path(env).resolve() if env else Path.cwd()
@@ -60,6 +61,7 @@ def _get_server_url() -> str:
 def _require_server() -> "httpx.Client":
     """Return an httpx client pointed at a running server, or exit."""
     import httpx
+
     url = _get_server_url()
     try:
         client = httpx.Client(base_url=url, timeout=10)
@@ -77,23 +79,30 @@ def _require_server() -> "httpx.Client":
 # Commands
 # ---------------------------------------------------------------------------
 
+
 @app.callback(invoke_without_command=True)
 def root(
     ctx: typer.Context,
-    version: bool = typer.Option(False, "--version", "-v", help="Print version and exit."),
+    version: bool = typer.Option(
+        False, "--version", "-v", help="Print version and exit."
+    ),
 ) -> None:
     if version:
         from openvibe import __version__
+
         console.print(f"openvibe {__version__}")
         raise typer.Exit()
     if ctx.invoked_subcommand is None:
         from openvibe.tui.app import run_tui
+
         run_tui(project_dir=_get_project_dir())
 
 
 @app.command()
 def tui(
-    project_dir: Optional[str] = typer.Option(None, "--dir", "-d", help="Project directory."),
+    project_dir: Optional[str] = typer.Option(
+        None, "--dir", "-d", help="Project directory."
+    ),
 ) -> None:
     """Launch the interactive TUI."""
     from openvibe.tui.app import run_tui
@@ -106,14 +115,20 @@ def tui(
 def serve(
     host: str = typer.Option(DEFAULT_HOST, "--host", "-H", help="Host to bind to."),
     port: int = typer.Option(DEFAULT_PORT, "--port", "-p", help="Port to listen on."),
-    project_dir: Optional[str] = typer.Option(None, "--dir", "-d", help="Project directory."),
-    reload: bool = typer.Option(False, "--reload", help="Auto-reload on code changes (dev only)."),
+    project_dir: Optional[str] = typer.Option(
+        None, "--dir", "-d", help="Project directory."
+    ),
+    reload: bool = typer.Option(
+        False, "--reload", help="Auto-reload on code changes (dev only)."
+    ),
 ) -> None:
     """Start the openvibe HTTP server."""
     import uvicorn
 
     resolved_dir = Path(project_dir).resolve() if project_dir else _get_project_dir()
-    console.print(f"[bold green]openvibe[/bold green] serving [cyan]{resolved_dir}[/cyan] on {host}:{port}")
+    console.print(
+        f"[bold green]openvibe[/bold green] serving [cyan]{resolved_dir}[/cyan] on {host}:{port}"
+    )
 
     from openvibe.config import load_config
     from openvibe.server import create_app
@@ -134,8 +149,12 @@ def serve(
 def run(
     prompt: str = typer.Argument(..., help="Prompt to send to the agent."),
     agent: str = typer.Option("build", "--agent", "-a", help="Agent to use."),
-    session_id: Optional[str] = typer.Option(None, "--session", "-s", help="Resume a session."),
-    project_dir: Optional[str] = typer.Option(None, "--dir", "-d", help="Project directory."),
+    session_id: Optional[str] = typer.Option(
+        None, "--session", "-s", help="Resume a session."
+    ),
+    project_dir: Optional[str] = typer.Option(
+        None, "--dir", "-d", help="Project directory."
+    ),
 ) -> None:
     """Run a one-shot prompt against the agent and print the response."""
     import httpx
@@ -201,6 +220,7 @@ def models() -> None:
 # ---------------------------------------------------------------------------
 # session sub-commands
 # ---------------------------------------------------------------------------
+
 
 @session_app.command("list")
 def session_list() -> None:

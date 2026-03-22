@@ -125,7 +125,11 @@ class SessionScreen(Screen):
 
         for msg in session.messages():
             for part in msg.parts:
-                if isinstance(part, ToolPart) and part.state.call_id and part.state.output is None:
+                if (
+                    isinstance(part, ToolPart)
+                    and part.state.call_id
+                    and part.state.output is None
+                ):
                     return part
         return None
 
@@ -164,8 +168,7 @@ class SessionScreen(Screen):
                     deferred[msg.id] = [
                         (i, part.state.model_dump())
                         for i, part in enumerate(prev.parts)
-                        if isinstance(part, ToolPart)
-                        and part.state.output is not None
+                        if isinstance(part, ToolPart) and part.state.output is not None
                     ]
 
         for msg in messages:
@@ -302,6 +305,7 @@ class SessionScreen(Screen):
         be echoed into the user message widget immediately.  Pass None when
         resuming after a permission reply.
         """
+
         def on_message(msg_id: str, role: str) -> None:
             self.app.call_from_thread(
                 self.post_message, events.NewMessage(msg_id, role)
@@ -340,16 +344,10 @@ class SessionScreen(Screen):
                 ),
             )
         elif response.state == SessionState.IDLE:
-            self.app.call_from_thread(
-                self.post_message, events.TurnCompleted("")
-            )
+            self.app.call_from_thread(self.post_message, events.TurnCompleted(""))
         else:
-            error_msg = (
-                response.error.message if response.error else "Unknown error"
-            )
-            self.app.call_from_thread(
-                self.post_message, events.StreamError(error_msg)
-            )
+            error_msg = response.error.message if response.error else "Unknown error"
+            self.app.call_from_thread(self.post_message, events.StreamError(error_msg))
 
     @work(thread=True)
     def _start_turn(self, text: str) -> None:
@@ -365,9 +363,7 @@ class SessionScreen(Screen):
             )
             self._dispatch_response(response)
         except Exception as exc:  # noqa: BLE001
-            self.app.call_from_thread(
-                self.post_message, events.StreamError(str(exc))
-            )
+            self.app.call_from_thread(self.post_message, events.StreamError(str(exc)))
 
     @work(thread=True)
     def _resume_turn(self, request_id: str, option: str) -> None:
@@ -378,9 +374,7 @@ class SessionScreen(Screen):
             response = session.reply(request_id, option)
             self._dispatch_response(response)
         except Exception as exc:  # noqa: BLE001
-            self.app.call_from_thread(
-                self.post_message, events.StreamError(str(exc))
-            )
+            self.app.call_from_thread(self.post_message, events.StreamError(str(exc)))
 
     @work(thread=True)
     def _start_resume_interrupted_turn(self, allow: bool) -> None:
@@ -400,9 +394,7 @@ class SessionScreen(Screen):
             )
             self._dispatch_response(response)
         except Exception as exc:  # noqa: BLE001
-            self.app.call_from_thread(
-                self.post_message, events.StreamError(str(exc))
-            )
+            self.app.call_from_thread(self.post_message, events.StreamError(str(exc)))
 
     # ------------------------------------------------------------------
     # Widget event handlers
@@ -451,7 +443,9 @@ class SessionScreen(Screen):
         self._refresh_header()
 
     @on(events.PermissionRequested)
-    async def handle_permission_requested(self, event: events.PermissionRequested) -> None:
+    async def handle_permission_requested(
+        self, event: events.PermissionRequested
+    ) -> None:
         from openvibe.config import MessageRole
         from openvibe.session import session as session_store
         from openvibe.session.models import TextPart

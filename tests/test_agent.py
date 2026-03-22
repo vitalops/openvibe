@@ -7,10 +7,10 @@ import pytest
 from openvibe.agent.agent import AgentInfo, list_agents, resolve
 from openvibe.config import AgentConfig, AgentMode, Config, ModelRef
 
-
 # ---------------------------------------------------------------------------
 # resolve() — built-in agents
 # ---------------------------------------------------------------------------
+
 
 def test_resolve_build_is_default():
     cfg = Config()
@@ -27,6 +27,7 @@ def test_resolve_build_has_bash_rule():
 
 def test_resolve_plan_denies_bash():
     from openvibe.config import PermissionAction
+
     cfg = Config()
     agent = resolve(cfg, "plan")
     bash_rules = [r for r in agent.permission_rules if r.tool == "bash"]
@@ -57,6 +58,7 @@ def test_resolve_unknown_agent_returns_shell():
 # ---------------------------------------------------------------------------
 # resolve() — user config overrides
 # ---------------------------------------------------------------------------
+
 
 def test_resolve_applies_temperature_override():
     cfg = Config(agent={"build": AgentConfig(temperature=0.1)})
@@ -100,7 +102,7 @@ def test_resolve_global_model_applied_when_agent_has_none():
 
 def test_resolve_agent_model_overrides_global():
     global_model = ModelRef(provider_id="anthropic", model_id="claude-3")
-    agent_model  = ModelRef(provider_id="openai", model_id="gpt-4o")
+    agent_model = ModelRef(provider_id="openai", model_id="gpt-4o")
     cfg = Config(
         model=global_model,
         agent={"build": AgentConfig(model=agent_model)},
@@ -124,6 +126,7 @@ def test_resolve_respects_default_agent_config():
 # ---------------------------------------------------------------------------
 # list_agents()
 # ---------------------------------------------------------------------------
+
 
 def test_list_agents_includes_builtins():
     cfg = Config()
