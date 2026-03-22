@@ -78,10 +78,6 @@ class SessionScreen(Screen):
             if pending:
                 self._pending_permission = pending
                 input_bar.enter_permission_mode()
-                input_bar.set_status(
-                    "[dim]1[/dim] allow  [dim]2[/dim] always  [dim]3[/dim] deny"
-                    "   [dim](enter = 1)[/dim]"
-                )
         elif self._session_was_interrupted(session):
             # Restart case: app was closed while a permission prompt was pending.
             # The worker thread is gone; we cannot resume via reply().
@@ -103,10 +99,6 @@ class SessionScreen(Screen):
                     "interrupted": True,
                 }
                 input_bar.enter_permission_mode()
-                input_bar.set_status(
-                    "[dim]1[/dim] allow  [dim]2[/dim] always  [dim]3[/dim] deny"
-                    "   [dim](enter = 1)[/dim]"
-                )
             else:
                 input_bar.set_status(
                     "[dim]Session was interrupted mid-tool. Send a message to continue.[/dim]"
@@ -480,9 +472,6 @@ class SessionScreen(Screen):
 
         input_bar = self.query_one(InputBar)
         input_bar.enter_permission_mode()
-        input_bar.set_status(
-            "[dim]1[/dim] allow  [dim]2[/dim] always  [dim]3[/dim] deny   [dim](enter = 1)[/dim]"
-        )
 
         self._pending_permission = {
             "request_id": event.request_id,

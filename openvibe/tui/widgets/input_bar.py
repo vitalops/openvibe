@@ -10,10 +10,27 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.message import Message
 from textual.timer import Timer
+from textual.containers import Horizontal
 from textual.widget import Widget
 from textual.widgets import Static, TextArea
 
 _SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+
+class PermButton(Static):
+    """Clickable permission button built on Static — no hidden inner label."""
+
+    can_focus = False
+
+    class Clicked(Message):
+        BUBBLE = True
+
+        def __init__(self, button_id: str) -> None:
+            self.button_id = button_id
+            super().__init__()
+
+    def on_click(self) -> None:
+        self.post_message(self.Clicked(self.id or ""))
 
 
 class ChatInput(TextArea):
@@ -96,6 +113,51 @@ class InputBar(Widget):
         height: 1;
         color: $text-disabled;
     }
+    InputBar #status.hidden {
+        display: none;
+    }
+    InputBar #perm-bar {
+        height: 1;
+        display: none;
+    }
+    InputBar #perm-bar.visible {
+        display: block;
+    }
+    InputBar .perm-btn {
+        height: 1;
+        width: auto;
+        padding: 0 1;
+        margin: 0 1 0 0;
+        color: white;
+    }
+    InputBar .perm-btn:hover {
+        text-style: bold;
+    }
+    InputBar #btn-allow {
+        background: green;
+    }
+    InputBar #btn-allow:hover {
+        background: #55ff55;
+        color: black;
+    }
+    InputBar #btn-always {
+        background: $surface-lighten-2;
+    }
+    InputBar #btn-always:hover {
+        background: $surface-lighten-3;
+    }
+    InputBar #btn-deny {
+        background: red;
+    }
+    InputBar #btn-deny:hover {
+        background: #ff5555;
+        color: black;
+    }
+    InputBar #perm-hint {
+        color: $text-disabled;
+        width: auto;
+        padding: 0 0 0 1;
+    }
     InputBar ChatInput {
         margin-top: 0;
     }
@@ -135,6 +197,11 @@ class InputBar(Widget):
 
     def compose(self) -> ComposeResult:
         yield Static(self._hint_text(), id="status")
+        with Horizontal(id="perm-bar"):
+            yield PermButton("1 allow", id="btn-allow", classes="perm-btn")
+            yield PermButton("2 always", id="btn-always", classes="perm-btn")
+            yield PermButton("3 deny", id="btn-deny", classes="perm-btn")
+            yield Static("[dim](enter = 1)[/dim]", id="perm-hint")
         yield ChatInput(id="chat-input")
 
     def _hint_text(self) -> str:
@@ -153,15 +220,30 @@ class InputBar(Widget):
         ci = self.query_one(ChatInput)
         ci._submittable = False
         ci.disabled = True
+        self.query_one("#status", Static).add_class("hidden")
+        self.query_one("#perm-bar").add_class("visible")
 
     def exit_permission_mode(self) -> None:
         self._permission_mode = False
         ci = self.query_one(ChatInput)
         ci.disabled = False
+        self.query_one("#perm-bar").remove_class("visible")
+        self.query_one("#status", Static).remove_class("hidden")
 
     @property
     def in_permission_mode(self) -> bool:
         return self._permission_mode
+
+    def on_perm_button_clicked(self, event: PermButton.Clicked) -> None:
+        if not self._permission_mode:
+            return
+        match event.button_id:
+            case "btn-allow":
+                self.post_message(self.Submitted("1"))
+            case "btn-always":
+                self.post_message(self.Submitted("2"))
+            case "btn-deny":
+                self.post_message(self.Submitted("3"))
 
     # ------------------------------------------------------------------
     # Freeze / unfreeze (spinner in status row, input stays visible)
