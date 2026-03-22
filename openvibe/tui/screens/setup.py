@@ -15,17 +15,8 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Center, Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import (
-    Button,
-    ContentSwitcher,
-    Input,
-    Label,
-    ListItem,
-    ListView,
-    RadioButton,
-    RadioSet,
-    Static,
-)
+from textual.widgets import (Button, ContentSwitcher, Input, Label, ListItem,
+                             ListView, RadioButton, RadioSet, Static)
 
 from openvibe.provider.provider import PROVIDERS, ProviderInfo
 

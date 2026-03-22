@@ -10,10 +10,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from textual import work  # noqa: F401 – used via @work decorator
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import Footer
-from textual import work  # noqa: F401 – used via @work decorator
 
 from openvibe.api import OpenVibe
 
@@ -99,8 +99,8 @@ class OpenvibeApp(App[None]):
         return self._pending_permissions.get(session_id)
 
     def action_sessions(self) -> None:
-        from openvibe.tui.screens.sessions import SessionListScreen
         from openvibe.tui.screens.session import SessionScreen
+        from openvibe.tui.screens.sessions import SessionListScreen
 
         def on_dismiss(session_id: str | None) -> None:
             if session_id:

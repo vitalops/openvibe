@@ -30,38 +30,18 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from openvibe.llm import (
-    LLMBackend,
-    Message,
-    ReasoningDelta,
-    StreamDone,
-    TextDelta,
-    ToolCallBegin,
-    ToolCallComplete,
-    ToolCallDelta,
-    ToolDefinition,
-)
-from openvibe.session import session as session_store
 from openvibe.config import MessageRole, ToolStateStatus
-from openvibe.session.models import (
-    APIError,
-    AssistantError,
-    AuthError,
-    ContextOverflowError,
-    MessageInfo,
-    PartUpdatedEvent,
-    ReasoningDeltaEvent,
-    ReasoningPart,
-    SessionInfo,
-    StepStartPart,
-    TextDeltaEvent,
-    TextPart,
-    ToolPart,
-    ToolState,
-    ToolStateChangedEvent,
-    TurnCompletedEvent,
-    now_iso,
-)
+from openvibe.llm import (LLMBackend, Message, ReasoningDelta, StreamDone,
+                          TextDelta, ToolCallBegin, ToolCallComplete,
+                          ToolCallDelta, ToolDefinition)
+from openvibe.session import session as session_store
+from openvibe.session.models import (APIError, AssistantError, AuthError,
+                                     ContextOverflowError, MessageInfo,
+                                     PartUpdatedEvent, ReasoningDeltaEvent,
+                                     ReasoningPart, SessionInfo, StepStartPart,
+                                     TextDeltaEvent, TextPart, ToolPart,
+                                     ToolState, ToolStateChangedEvent,
+                                     TurnCompletedEvent, now_iso)
 from openvibe.tool.base import Tool, ToolContext, ToolRegistry, ToolResult
 
 if TYPE_CHECKING:
@@ -595,10 +575,8 @@ class SessionProcessor:
         try:
             return await tool(ctx, args)
         except Exception as exc:
-            from openvibe.permission.permission import (
-                PermissionDenied,
-                PermissionRejected,
-            )
+            from openvibe.permission.permission import (PermissionDenied,
+                                                        PermissionRejected)
 
             if isinstance(exc, (PermissionDenied, PermissionRejected)):
                 return ToolResult(

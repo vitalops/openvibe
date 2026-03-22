@@ -5,12 +5,8 @@ from __future__ import annotations
 import pytest
 
 from openvibe.config import PermissionAction
-from openvibe.permission.permission import (
-    PermissionDenied,
-    PermissionRejected,
-    Rule,
-    _matches,
-)
+from openvibe.permission.permission import (PermissionDenied,
+                                            PermissionRejected, Rule, _matches)
 
 # ---------------------------------------------------------------------------
 # _matches — tool name matching

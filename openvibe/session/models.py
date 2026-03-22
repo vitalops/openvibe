@@ -178,8 +178,9 @@ AssistantError = Annotated[
 # Bus events (published by the session processor)
 # ---------------------------------------------------------------------------
 
-from openvibe.bus import Event
 from dataclasses import dataclass
+
+from openvibe.bus import Event
 
 
 @dataclass

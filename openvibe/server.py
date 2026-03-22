@@ -574,10 +574,8 @@ async def _make_event_stream(
     turn and updates ``_pending_permissions`` from ``PermissionRequestedEvent``
     and ``PermissionRepliedEvent`` bus events.
     """
-    from openvibe.permission.permission import (
-        PermissionRequestedEvent,
-        PermissionRepliedEvent,
-    )
+    from openvibe.permission.permission import (PermissionRepliedEvent,
+                                                PermissionRequestedEvent)
     from openvibe.session.models import TurnCompletedEvent
 
     _active_aborts[session_id] = abort

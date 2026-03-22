@@ -15,7 +15,6 @@ import pytest
 
 from openvibe.api import InvalidStateError, OpenVibe, Response, SessionState
 from openvibe.config import AgentConfig, Config
-
 from tests.mock_llm import MockLLM, ScriptedMockLLM
 
 # ---------------------------------------------------------------------------
@@ -720,16 +719,16 @@ def test_delete_session_archives_not_hard_deletes(tmp_path):
 
 
 def test_build_system_prompt_with_base_only():
-    from openvibe.api import _build_system_prompt
     from openvibe.agent.agent import AgentInfo
+    from openvibe.api import _build_system_prompt
 
     agent = AgentInfo(name="x", description="", system_prompt="base prompt")
     assert _build_system_prompt(agent) == "base prompt"
 
 
 def test_build_system_prompt_with_extra_instructions():
-    from openvibe.api import _build_system_prompt
     from openvibe.agent.agent import AgentInfo
+    from openvibe.api import _build_system_prompt
 
     agent = AgentInfo(
         name="x",
@@ -744,8 +743,8 @@ def test_build_system_prompt_with_extra_instructions():
 
 
 def test_build_system_prompt_empty_agent():
-    from openvibe.api import _build_system_prompt
     from openvibe.agent.agent import AgentInfo
+    from openvibe.api import _build_system_prompt
 
     agent = AgentInfo(name="x", description="", system_prompt="")
     assert _build_system_prompt(agent) == ""
@@ -757,16 +756,16 @@ def test_build_system_prompt_empty_agent():
 
 
 def test_model_string_default():
-    from openvibe.api import _model_string
     from openvibe.agent.agent import AgentInfo
+    from openvibe.api import _model_string
 
     agent = AgentInfo(name="x", description="", system_prompt="")
     assert _model_string(agent) == "anthropic/claude-sonnet-4-5"
 
 
 def test_model_string_with_model():
-    from openvibe.api import _model_string
     from openvibe.agent.agent import AgentInfo
+    from openvibe.api import _model_string
     from openvibe.config import ModelRef
 
     agent = AgentInfo(
@@ -809,8 +808,8 @@ def test_messages_to_litellm_with_tool_call(tmp_path):
 def test_messages_to_litellm_skips_empty_assistant_messages(tmp_path):
     """Assistant messages with no text and no tool calls must be omitted."""
     from openvibe.api import _messages_to_litellm
-    from openvibe.session import session as _session_store
     from openvibe.config import MessageRole
+    from openvibe.session import session as _session_store
 
     llm = MockLLM({"hi": "hello"})
     with _ov(tmp_path, llm=llm) as ov:

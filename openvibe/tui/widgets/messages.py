@@ -6,12 +6,12 @@ from typing import Any
 
 from rich.markup import escape as _escape
 from rich.syntax import Syntax as _Syntax
-
-from openvibe.tui.markdown import render_markdown
 from textual.app import ComposeResult
 from textual.containers import VerticalScroll
 from textual.widget import Widget
 from textual.widgets import Static
+
+from openvibe.tui.markdown import render_markdown
 
 # ---------------------------------------------------------------------------
 # Helpers

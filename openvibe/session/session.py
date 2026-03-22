@@ -11,7 +11,8 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from openvibe.config import MessageRole
-from openvibe.session.models import MessageInfo, MessagePart, SessionInfo, now_iso
+from openvibe.session.models import (MessageInfo, MessagePart, SessionInfo,
+                                     now_iso)
 
 if TYPE_CHECKING:
     from openvibe.db import Database

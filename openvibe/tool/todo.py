@@ -11,7 +11,7 @@ and avoid forgetting outstanding items.
 from __future__ import annotations
 
 import uuid
-from typing import Literal, TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import Field
 
@@ -45,7 +45,8 @@ class TodoWriteTool(Tool):
     async def execute(
         self, ctx: ToolContext, params: "TodoWriteTool.Params"
     ) -> ToolResult:
-        from openvibe.tool.todo import _sync_todos  # avoid circular at module level
+        from openvibe.tool.todo import \
+            _sync_todos  # avoid circular at module level
 
         count = _sync_todos(ctx, params.todos)
         return ToolResult(

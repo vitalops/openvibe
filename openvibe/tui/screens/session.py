@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from textual import events as textual_events, on, work
+from textual import events as textual_events
+from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.screen import Screen

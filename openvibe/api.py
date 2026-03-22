@@ -709,6 +709,7 @@ class OpenVibe:
     def _init_mcp(self) -> None:
         """Run MCP async initialisation once (blocks, then stores tools)."""
         import asyncio
+
         from openvibe.mcp.client import McpClientManager
 
         mcp = McpClientManager()
@@ -798,14 +799,10 @@ async def _run_turn_async(
     from openvibe.config import MessageRole, PermissionAction
     from openvibe.permission.permission import PermissionRequestedEvent
     from openvibe.session import session as _store
-    from openvibe.session.models import (
-        MessageCreatedEvent,
-        ReasoningDeltaEvent,
-        TextDeltaEvent,
-        TextPart,
-        ToolStateChangedEvent,
-        TurnCompletedEvent,
-    )
+    from openvibe.session.models import (MessageCreatedEvent,
+                                         ReasoningDeltaEvent, TextDeltaEvent,
+                                         TextPart, ToolStateChangedEvent,
+                                         TurnCompletedEvent)
 
     accumulated_text = ""
 
@@ -1022,13 +1019,10 @@ async def _run_interrupted_async(
     from openvibe.config import MessageRole, PermissionAction
     from openvibe.permission.permission import PermissionRequestedEvent
     from openvibe.session import session as _store
-    from openvibe.session.models import (
-        MessageCreatedEvent,
-        ReasoningDeltaEvent,
-        TextDeltaEvent,
-        ToolStateChangedEvent,
-        TurnCompletedEvent,
-    )
+    from openvibe.session.models import (MessageCreatedEvent,
+                                         ReasoningDeltaEvent, TextDeltaEvent,
+                                         ToolStateChangedEvent,
+                                         TurnCompletedEvent)
 
     accumulated_text = ""
     abort_async = _asyncio.Event()
@@ -1455,6 +1449,7 @@ def _check_permission(
 ) -> str:  # "allow" | "deny" | "abort"
     """Evaluate permission rules; suspend the worker when action is 'ask'."""
     import fnmatch
+
     from openvibe.config import PermissionAction
 
     for rule in rules:
@@ -1510,6 +1505,7 @@ def _call_tool_sync(
 ) -> Any:  # ToolResult
     """Execute an (async) tool synchronously via a contained event loop."""
     import asyncio
+
     from openvibe.tool.base import ToolContext, ToolResult
 
     ctx = ToolContext(

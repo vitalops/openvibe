@@ -174,8 +174,8 @@ class WelcomeScreen(Screen[None]):
         self._open_session(session.id)
 
     def action_all_sessions(self) -> None:
-        from openvibe.tui.screens.sessions import SessionListScreen
         from openvibe.tui.screens.session import SessionScreen
+        from openvibe.tui.screens.sessions import SessionListScreen
 
         def on_dismiss(session_id: str | None) -> None:
             if session_id:

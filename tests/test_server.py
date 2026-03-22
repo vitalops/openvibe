@@ -519,11 +519,10 @@ def test_get_session_state_not_found(client: TestClient) -> None:
 
 def test_get_session_state_interrupted(tmp_path: Path) -> None:
     """A session with an unresolved ToolPart (output=None) reports 'interrupted'."""
-    from openvibe.config import ToolStateStatus
+    from openvibe.config import MessageRole, ToolStateStatus
     from openvibe.db import create_database
     from openvibe.session import session as session_store
     from openvibe.session.models import ToolPart, ToolState
-    from openvibe.config import MessageRole
 
     db = create_database(tmp_path / "test.db")
     app = create_app(project_dir=tmp_path, config=Config(), db=db, llm=_FakeLLM())
@@ -594,10 +593,10 @@ def test_resume_not_interrupted(client: TestClient) -> None:
 
 def test_resume_allow_streams_sse(tmp_path: Path) -> None:
     """Resuming with allow=True executes the tool and streams the response."""
-    from openvibe.config import ToolStateStatus, MessageRole
+    from openvibe.config import MessageRole, ToolStateStatus
     from openvibe.db import create_database
     from openvibe.session import session as session_store
-    from openvibe.session.models import ToolPart, ToolState, TextPart
+    from openvibe.session.models import TextPart, ToolPart, ToolState
 
     db = create_database(tmp_path / "test.db")
     app = create_app(project_dir=tmp_path, config=Config(), db=db, llm=_FakeLLM())
@@ -630,10 +629,10 @@ def test_resume_allow_streams_sse(tmp_path: Path) -> None:
 
 def test_resume_deny_streams_sse(tmp_path: Path) -> None:
     """Resuming with allow=False injects a denied result and streams the response."""
-    from openvibe.config import ToolStateStatus, MessageRole
+    from openvibe.config import MessageRole, ToolStateStatus
     from openvibe.db import create_database
     from openvibe.session import session as session_store
-    from openvibe.session.models import ToolPart, ToolState, TextPart
+    from openvibe.session.models import TextPart, ToolPart, ToolState
 
     db = create_database(tmp_path / "test.db")
     app = create_app(project_dir=tmp_path, config=Config(), db=db, llm=_FakeLLM())
@@ -664,10 +663,10 @@ def test_resume_deny_streams_sse(tmp_path: Path) -> None:
 
 def test_resume_marks_tool_completed_in_db(tmp_path: Path) -> None:
     """After resume allow=True the interrupted ToolPart should have output in DB."""
-    from openvibe.config import ToolStateStatus, MessageRole
+    from openvibe.config import MessageRole, ToolStateStatus
     from openvibe.db import create_database
     from openvibe.session import session as session_store
-    from openvibe.session.models import ToolPart, ToolState, TextPart
+    from openvibe.session.models import TextPart, ToolPart, ToolState
 
     db = create_database(tmp_path / "test.db")
     app = create_app(project_dir=tmp_path, config=Config(), db=db, llm=_FakeLLM())

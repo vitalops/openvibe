@@ -8,13 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from openvibe.config import (
-    Config,
-    ModelRef,
-    _deep_merge,
-    _expand_env,
-    load_config,
-)
+from openvibe.config import (Config, ModelRef, _deep_merge, _expand_env,
+                             load_config)
 
 # ---------------------------------------------------------------------------
 # _deep_merge
