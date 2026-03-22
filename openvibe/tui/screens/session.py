@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from textual import on, work
+from textual import events as textual_events, on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.screen import Screen
@@ -76,7 +76,7 @@ class SessionScreen(Screen):
             pending = self.app.get_pending_permission(self._session_id)  # type: ignore[attr-defined]
             if pending:
                 self._pending_permission = pending
-                input_bar.unfreeze()
+                input_bar.enter_permission_mode()
                 input_bar.set_status(
                     "[dim]1[/dim] allow  [dim]2[/dim] always  [dim]3[/dim] deny"
                     "   [dim](enter = 1)[/dim]"
@@ -101,7 +101,7 @@ class SessionScreen(Screen):
                     "message_id": perm_msg.id,
                     "interrupted": True,
                 }
-                input_bar.unfreeze()
+                input_bar.enter_permission_mode()
                 input_bar.set_status(
                     "[dim]1[/dim] allow  [dim]2[/dim] always  [dim]3[/dim] deny"
                     "   [dim](enter = 1)[/dim]"
@@ -145,27 +145,52 @@ class SessionScreen(Screen):
     # ------------------------------------------------------------------
 
     async def _load_history(self, session: Any) -> None:
+        from openvibe.config import MessageRole
+
         msg_list = self.query_one(MessageList)
-        for msg in session.messages():
+        messages = session.messages()
+
+        # Identify assistant messages immediately followed by a permission
+        # message.  Their completed tool parts should render *after* the
+        # permission prompt (on the permission widget), matching live behaviour.
+        defer_from: set[str] = set()
+        # Map: permission message id → list of (part_index, state_dict)
+        deferred: dict[str, list[tuple[int, dict]]] = {}
+        for idx, msg in enumerate(messages):
+            if msg.role == MessageRole.PERMISSION and idx > 0:
+                prev = messages[idx - 1]
+                if prev.role == MessageRole.ASSISTANT:
+                    defer_from.add(prev.id)
+                    deferred[msg.id] = [
+                        (i, part.state.model_dump())
+                        for i, part in enumerate(prev.parts)
+                        if isinstance(part, ToolPart)
+                        and part.state.output is not None
+                    ]
+
+        for msg in messages:
             role = str(msg.role)
             widget = await msg_list.add_message(msg.id, role)
+
             for i, part in enumerate(msg.parts):
                 if isinstance(part, TextPart):
-                    # Permission messages are stored with Rich markup already
-                    # embedded; use replace_text (no escaping) so tags render
-                    # correctly.  All other roles store plain text and need the
-                    # escaping that append_text provides.
                     if role == "permission":
                         widget.replace_text(part.content)
                     else:
                         widget.append_text(part.content)
                 elif isinstance(part, ToolPart):
-                    # Skip interrupted tool parts (output=None) — they have
-                    # no result to display yet and will be rendered below the
-                    # permission message once the user allows/denies on resume.
                     if part.state.output is None and part.state.call_id:
                         continue
+                    # Skip tools deferred to a permission message.
+                    if msg.id in defer_from:
+                        continue
                     await widget.add_tool(i, part.state.model_dump())
+
+            # After rendering the permission message text, mount the
+            # deferred tool parts from the preceding assistant message.
+            if msg.id in deferred:
+                for part_idx, state_dict in deferred[msg.id]:
+                    await widget.add_tool(part_idx, state_dict)
 
     @staticmethod
     def _fmt_tokens(n: int) -> str:
@@ -243,8 +268,10 @@ class SessionScreen(Screen):
                 f"[dim]→[/dim] {label}"
             )
 
-        # Re-freeze while the agent finishes executing the tool.
-        self.query_one(InputBar).freeze()
+        # Exit permission mode and re-freeze while the agent executes the tool.
+        input_bar = self.query_one(InputBar)
+        input_bar.exit_permission_mode()
+        input_bar.freeze()
 
         if pending.get("interrupted"):
             # Restart case: no live worker thread exists.  Execute the tool
@@ -457,7 +484,7 @@ class SessionScreen(Screen):
         widget.replace_text(msg_text)
 
         input_bar = self.query_one(InputBar)
-        input_bar.unfreeze()
+        input_bar.enter_permission_mode()
         input_bar.set_status(
             "[dim]1[/dim] allow  [dim]2[/dim] always  [dim]3[/dim] deny   [dim](enter = 1)[/dim]"
         )
@@ -509,6 +536,23 @@ class SessionScreen(Screen):
         ov = self.app.ov  # type: ignore[attr-defined]
         session = ov.create_session()
         self.app.push_screen(SessionScreen(session.id))
+
+    def on_key(self, event: textual_events.Key) -> None:
+        input_bar = self.query_one(InputBar)
+        if not input_bar.in_permission_mode:
+            return
+        if event.key in ("1", "enter"):
+            event.stop()
+            event.prevent_default()
+            input_bar.post_message(InputBar.Submitted("1"))
+        elif event.key == "2":
+            event.stop()
+            event.prevent_default()
+            input_bar.post_message(InputBar.Submitted("2"))
+        elif event.key == "3":
+            event.stop()
+            event.prevent_default()
+            input_bar.post_message(InputBar.Submitted("3"))
 
     def action_noop(self) -> None:
         pass

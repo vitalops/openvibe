@@ -130,6 +130,7 @@ class InputBar(Widget):
         self._spinner_frame: int = 0
         self._spinner_timer: Timer | None = None
         self._thinking_start: float = 0.0
+        self._permission_mode: bool = False
         super().__init__(**kwargs)
 
     def compose(self) -> ComposeResult:
@@ -141,6 +142,26 @@ class InputBar(Widget):
 
     def focus_input(self) -> None:
         self.query_one(ChatInput).focus()
+
+    # ------------------------------------------------------------------
+    # Permission mode (single-keypress input: 1/2/3/enter)
+    # ------------------------------------------------------------------
+
+    def enter_permission_mode(self) -> None:
+        self._stop_spinner()
+        self._permission_mode = True
+        ci = self.query_one(ChatInput)
+        ci._submittable = False
+        ci.disabled = True
+
+    def exit_permission_mode(self) -> None:
+        self._permission_mode = False
+        ci = self.query_one(ChatInput)
+        ci.disabled = False
+
+    @property
+    def in_permission_mode(self) -> bool:
+        return self._permission_mode
 
     # ------------------------------------------------------------------
     # Freeze / unfreeze (spinner in status row, input stays visible)
