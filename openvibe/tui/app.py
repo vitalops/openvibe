@@ -113,6 +113,7 @@ class OpenvibeApp(App[None]):
 
         self.push_screen(SessionListScreen(), on_dismiss)
 
+
 def _needs_setup(project_dir: Path) -> bool:
     """Return True if no model is configured from any config source."""
     try:

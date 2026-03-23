@@ -1,5 +1,4 @@
-"""LoopGPT is a modular Auto-GPT framework
-"""
+"""LoopGPT is a modular Auto-GPT framework"""
 
 __version__ = "0.1.2"
 

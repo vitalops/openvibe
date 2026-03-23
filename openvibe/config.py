@@ -198,11 +198,7 @@ def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]
 # ---------------------------------------------------------------------------
 
 _JSONC_COMMENT_RE = re.compile(
-    r'"(?:[^"\\]|\\.)*"'
-    r'|'
-    r'//[^\n]*'
-    r'|'
-    r'/\*.*?\*/',
+    r'"(?:[^"\\]|\\.)*"' r"|" r"//[^\n]*" r"|" r"/\*.*?\*/",
     re.DOTALL,
 )
 
@@ -213,6 +209,7 @@ def _strip_jsonc_comments(text: str) -> str:
         if s.startswith('"'):
             return s
         return "\n" * s.count("\n")
+
     return _JSONC_COMMENT_RE.sub(_replace, text)
 
 
