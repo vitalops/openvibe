@@ -197,14 +197,30 @@ def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]
 # Loading
 # ---------------------------------------------------------------------------
 
+_JSONC_COMMENT_RE = re.compile(
+    r'"(?:[^"\\]|\\.)*"' r"|" r"//[^\n]*" r"|" r"/\*.*?\*/",
+    re.DOTALL,
+)
+
+
+def _strip_jsonc_comments(text: str) -> str:
+    def _replace(match: re.Match) -> str:
+        s = match.group(0)
+        if s.startswith('"'):
+            return s
+        return "\n" * s.count("\n")
+
+    return _JSONC_COMMENT_RE.sub(_replace, text)
+
 
 def _load_json(path: Path) -> dict[str, Any]:
     """Load a JSON (or JSONC — JSON with // comments) file."""
-    text = path.read_text(encoding="utf-8")
-    # Strip single-line // comments (simple approach, not spec-complete)
-    lines = [re.sub(r"\s*//.*$", "", line) for line in text.splitlines()]
     try:
-        return json.loads("\n".join(lines))
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    try:
+        return json.loads(_strip_jsonc_comments(text))
     except json.JSONDecodeError as exc:
         raise ValueError(f"Invalid JSON in {path}: {exc}") from exc
 
