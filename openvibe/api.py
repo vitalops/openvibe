@@ -267,7 +267,8 @@ class Session:
 
     def _try_command(self, text: str) -> Response | None:
         """If *text* is a slash command, execute it and return a Response."""
-        from openvibe.commands import CommandContext, get_command, execute, is_command
+        from openvibe.commands import (CommandContext, execute, get_command,
+                                       is_command)
 
         if not is_command(text):
             return None

@@ -11,7 +11,6 @@ import pytest
 from openvibe.commands import CommandContext, execute
 from openvibe.config import Config, ModelRef
 
-
 # ---------------------------------------------------------------------------
 # Minimal fakes so we can construct a CommandContext without a real Session
 # ---------------------------------------------------------------------------
@@ -41,14 +40,18 @@ class _FakeSession:
     def update_session_config(self, overrides: dict) -> None:
         """Record the config update (no DB in test fakes)."""
         import copy
+
         from openvibe.config import _deep_merge
+
         self._session_config_updates.append(overrides)
         base = self._config.model_dump()
         merged = _deep_merge(base, overrides)
         self._config = Config.model_validate(merged)
 
 
-def _ctx(tmp_path: Path, args: str = "", config: Config | None = None) -> CommandContext:
+def _ctx(
+    tmp_path: Path, args: str = "", config: Config | None = None
+) -> CommandContext:
     return CommandContext(session=_FakeSession(tmp_path, config), args=args)
 
 
@@ -98,7 +101,11 @@ def test_model_session_scope_no_file_written(tmp_path):
 
 def test_model_infers_provider(tmp_path):
     """When no slash in model arg, infer provider from current model."""
-    ctx = _ctx(tmp_path, args="gpt-4o", config=Config(model=ModelRef(provider_id="openai", model_id="gpt-3.5")))
+    ctx = _ctx(
+        tmp_path,
+        args="gpt-4o",
+        config=Config(model=ModelRef(provider_id="openai", model_id="gpt-3.5")),
+    )
     execute("model", ctx)
     assert ctx.session._config.model.provider_id == "openai"
     assert ctx.session._config.model.model_id == "gpt-4o"
@@ -227,9 +234,9 @@ def test_model_session_scope_records_update(tmp_path):
 
 def _ov(tmp_path, config=None):
     """Create an OpenVibe instance backed by a real temp DB."""
+    from openvibe.api import OpenVibe
     from openvibe.config import Config
     from openvibe.db import create_database
-    from openvibe.api import OpenVibe
 
     db = create_database(tmp_path / "test.db")
     return OpenVibe(project_dir=tmp_path, db=db, config=config or Config())

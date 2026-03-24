@@ -128,11 +128,13 @@ class PermissionService:
     def clear_rules(self, project_id: str) -> int:
         """Delete all stored rules for *project_id*.  Returns the count removed."""
         rows = self._db.fetchall(
-            "SELECT id FROM permissions WHERE project_id = ?", (project_id,),
+            "SELECT id FROM permissions WHERE project_id = ?",
+            (project_id,),
         )
         if rows:
             self._db.execute(
-                "DELETE FROM permissions WHERE project_id = ?", (project_id,),
+                "DELETE FROM permissions WHERE project_id = ?",
+                (project_id,),
             )
         return len(rows)
 

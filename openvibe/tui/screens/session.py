@@ -256,7 +256,10 @@ class SessionScreen(Screen):
 
         # Persist and display the command as a user message.
         user_msg = session_store.add_message(
-            db, self._session_id, MessageRole.USER, [TextPart(content=text)],
+            db,
+            self._session_id,
+            MessageRole.USER,
+            [TextPart(content=text)],
         )
         widget = await msg_list.add_message(user_msg.id, "user")
         widget.append_text(text)
@@ -283,11 +286,14 @@ class SessionScreen(Screen):
         # Persist and display the result as an assistant message.
         if result.output:
             reply_msg = session_store.add_message(
-                db, self._session_id, MessageRole.ASSISTANT,
+                db,
+                self._session_id,
+                MessageRole.ASSISTANT,
                 [TextPart(content=result.output)],
             )
             result_widget = await msg_list.add_message(
-                reply_msg.id, str(MessageRole.ASSISTANT),
+                reply_msg.id,
+                str(MessageRole.ASSISTANT),
             )
             result_widget.append_text(result.output)
 

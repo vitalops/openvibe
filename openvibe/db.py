@@ -213,9 +213,7 @@ class SQLiteDatabase:
         self._add_column_if_missing("sessions", "config_json", "TEXT")
         self._conn.commit()
 
-    def _add_column_if_missing(
-        self, table: str, column: str, col_type: str
-    ) -> None:
+    def _add_column_if_missing(self, table: str, column: str, col_type: str) -> None:
         """Idempotent ALTER TABLE ADD COLUMN."""
         cols = {
             row["name"]

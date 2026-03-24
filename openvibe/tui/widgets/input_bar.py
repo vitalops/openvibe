@@ -8,9 +8,9 @@ from typing import Any
 from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding
+from textual.containers import Horizontal
 from textual.message import Message
 from textual.timer import Timer
-from textual.containers import Horizontal
 from textual.widget import Widget
 from textual.widgets import Static, TextArea
 
