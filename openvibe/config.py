@@ -198,7 +198,7 @@ def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]
 # ---------------------------------------------------------------------------
 
 _JSONC_COMMENT_RE = re.compile(
-    r'"(?:[^"\\]|\\.)*"' r"|" r"//[^\n]*" r"|" r"/\*.*?\*/",
+    r'"(?:[^"\\]|\\.)*"' r'|' r'//[^\n]*' r'|' r'/\*.*?\*/',
     re.DOTALL,
 )
 
@@ -209,7 +209,6 @@ def _strip_jsonc_comments(text: str) -> str:
         if s.startswith('"'):
             return s
         return "\n" * s.count("\n")
-
     return _JSONC_COMMENT_RE.sub(_replace, text)
 
 
@@ -230,6 +229,24 @@ def _try_load(path: Path) -> dict[str, Any]:
     if path.exists():
         return _load_json(path)
     return {}
+
+
+def _validate_credentials(config: Config) -> None:
+    """Raise ValueError if a model is configured but no credential is available."""
+    if config.model is None:
+        return
+    provider_id = config.model.provider_id
+    key_var, _, _ = _PROVIDER_ENV.get(provider_id, (None, None, None))
+    if key_var is None:
+        return
+    pcfg = config.provider.get(provider_id)
+    has_key_in_config = bool(pcfg and pcfg.api_key)
+    has_key_in_env = bool(os.environ.get(key_var))
+    if not (has_key_in_config or has_key_in_env):
+        raise ValueError(
+            f"No API key found for provider '{provider_id}'. "
+            f"Set it in openvibe.json or via the {key_var} environment variable."
+        )
 
 
 def load_config(project_dir: Path | None = None) -> Config:
@@ -271,6 +288,7 @@ def load_config(project_dir: Path | None = None) -> Config:
     raw = _expand_env(raw)
     config = Config.model_validate(raw)
     _apply_provider_env(config)
+    _validate_credentials(config)
     return config
 
 
