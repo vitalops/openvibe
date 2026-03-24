@@ -36,7 +36,7 @@ class SessionScreen(Screen):
     BINDINGS = [
         Binding("ctrl+s", "sessions", "Sessions", show=True),
         Binding("ctrl+n", "new_session", "New", show=True),
-        Binding("escape", "noop", ""),
+        Binding("escape", "cancel_turn", "Cancel", show=False),
     ]
 
     def __init__(self, session_id: str, **kwargs: Any) -> None:
@@ -599,5 +599,11 @@ class SessionScreen(Screen):
             event.prevent_default()
             input_bar.post_message(InputBar.Submitted("3"))
 
-    def action_noop(self) -> None:
-        pass
+    def action_cancel_turn(self) -> None:
+        """Cancel the active agent turn (escape)."""
+        session = self.app.get_session(self._session_id)  # type: ignore[attr-defined]
+        if session.state != SessionState.THINKING:
+            return
+        session.abort()
+        self.query_one(InputBar).enable()
+        self._refresh_header()

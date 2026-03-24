@@ -50,6 +50,10 @@ class SessionInfo(BaseModel):
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
 
+    # Session-level config overrides (JSON blob, nullable).
+    # Merged on top of the base project config when the Session is loaded.
+    config_json: str | None = None
+
 
 # ---------------------------------------------------------------------------
 # Part types (discriminated union on `type`)

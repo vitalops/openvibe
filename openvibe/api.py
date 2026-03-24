@@ -165,7 +165,8 @@ class Session:
         self._info = session_info
         self._db = db
         self._registry = registry
-        self._config = config
+        self._base_config = config
+        self._config = self._build_session_config(config, session_info)
         self._agent_name = agent_name
         self._llm = llm
         self._processor = processor
@@ -206,6 +207,59 @@ class Session:
         from openvibe.session import session as _store
 
         return _store.list_messages(self._db, self._info.id)
+
+    # ------------------------------------------------------------------
+    # Session-level config
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_session_config(base_config: Any, session_info: Any) -> Any:
+        """Return a Config that merges base + session-level overrides."""
+        import copy
+        import json as _json
+
+        from openvibe.config import Config
+
+        overrides_str = getattr(session_info, "config_json", None)
+        if not overrides_str:
+            return copy.deepcopy(base_config)
+
+        base_dict = base_config.model_dump()
+        try:
+            overlay = _json.loads(overrides_str)
+        except (ValueError, TypeError):
+            return copy.deepcopy(base_config)
+
+        from openvibe.config import _deep_merge
+
+        merged = _deep_merge(base_dict, overlay)
+        return Config.model_validate(merged)
+
+    def update_session_config(self, overrides: dict[str, Any]) -> None:
+        """Persist session-level config *overrides* to the DB and refresh.
+
+        *overrides* is a partial config dict (e.g. ``{"model": {...}}``).
+        It is deep-merged with any existing session overrides.
+        """
+        import json as _json
+
+        from openvibe.config import Config, _deep_merge
+        from openvibe.session import session as _store
+
+        existing: dict[str, Any] = {}
+        if self._info.config_json:
+            try:
+                existing = _json.loads(self._info.config_json)
+            except (ValueError, TypeError):
+                pass
+
+        merged = _deep_merge(existing, overrides)
+        blob = _json.dumps(merged)
+        _store.update_config(self._db, self._info.id, blob)
+        self._info.config_json = blob
+
+        # Rebuild the effective config
+        self._config = self._build_session_config(self._base_config, self._info)
 
     # ------------------------------------------------------------------
     # Blocking API
@@ -255,7 +309,7 @@ class Session:
             return cmd_response
 
         with self._lock:
-            if self._state != SessionState.IDLE:
+            if self._state not in (SessionState.IDLE, SessionState.ERROR):
                 raise InvalidStateError(
                     f"send() requires IDLE state; current: {self._state}"
                 )
@@ -314,7 +368,7 @@ class Session:
             return
 
         with self._lock:
-            if self._state != SessionState.IDLE:
+            if self._state not in (SessionState.IDLE, SessionState.ERROR):
                 raise InvalidStateError(
                     f"send_nowait() requires IDLE state; current: {self._state}"
                 )

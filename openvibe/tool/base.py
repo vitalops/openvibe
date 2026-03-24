@@ -151,6 +151,9 @@ class Tool(abc.ABC):
         """Execute the tool with *params* in *ctx*. Must be overridden."""
         ...
 
+    def cancel(self) -> None:
+        """Cancel a running execution. Override in subclasses that support it."""
+
     async def __call__(
         self, ctx: ToolContext, raw_args: str | dict[str, Any]
     ) -> ToolResult:

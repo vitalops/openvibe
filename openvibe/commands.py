@@ -301,8 +301,21 @@ def cmd_model(ctx: CommandContext) -> CommandResult:
             for pid in sorted(config.provider):
                 lines.append(f"  [dim]{pid}[/dim]")
 
-        lines.append("\n[dim]Usage: /model provider/model_id[/dim]")
+        lines.append(
+            "\n[dim]Usage: /model provider/model_id [--session|--project|--global][/dim]"
+        )
         return CommandResult(output="\n".join(lines))
+
+    # Parse scope flag from the end of the args string
+    scope = "session"
+    for flag in ("--session", "--global", "--project"):
+        if args.endswith(flag):
+            scope = flag[2:]
+            args = args[: -len(flag)].strip()
+            break
+
+    if not args:
+        return CommandResult(output="[red]Missing model argument.[/red]")
 
     # Switch model: /model provider/model_id
     if "/" in args:
@@ -312,12 +325,35 @@ def cmd_model(ctx: CommandContext) -> CommandResult:
         provider_id = config.model.provider_id if config.model else "anthropic"
         model_id = args
 
-    from openvibe.config import ModelRef
+    from openvibe.config import ModelRef, save_model_to_global, save_model_to_project
 
-    config.model = ModelRef(provider_id=provider_id, model_id=model_id)
+    new_model = ModelRef(provider_id=provider_id, model_id=model_id)
+    model_dict = {"model": {"provider_id": provider_id, "model_id": model_id}}
+
+    if scope == "global":
+        path = save_model_to_global(new_model)
+        # Also apply to current session in-memory
+        ctx.session.update_session_config(model_dict)
+        return CommandResult(
+            output=f"[green]Model switched to:[/green] {provider_id}/{model_id}\n"
+            f"[dim]Saved to {path}[/dim]"
+        )
+
+    if scope == "project":
+        project_dir = _project_dir(ctx)
+        path = save_model_to_project(new_model, project_dir)
+        # Also apply to current session in-memory
+        ctx.session.update_session_config(model_dict)
+        return CommandResult(
+            output=f"[green]Model switched to:[/green] {provider_id}/{model_id}\n"
+            f"[dim]Saved to {path}[/dim]"
+        )
+
+    # session (default) — persists to DB so model survives session resume
+    ctx.session.update_session_config(model_dict)
     return CommandResult(
         output=f"[green]Model switched to:[/green] {provider_id}/{model_id}\n"
-        f"[dim]This change is for the current session only.[/dim]"
+        f"[dim]Saved to session.[/dim]"
     )
 
 

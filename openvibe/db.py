@@ -209,7 +209,20 @@ class SQLiteDatabase:
             s = stmt.strip()
             if s:
                 self._conn.execute(s)
+        # Incremental migrations for columns added after initial schema.
+        self._add_column_if_missing("sessions", "config_json", "TEXT")
         self._conn.commit()
+
+    def _add_column_if_missing(
+        self, table: str, column: str, col_type: str
+    ) -> None:
+        """Idempotent ALTER TABLE ADD COLUMN."""
+        cols = {
+            row["name"]
+            for row in self._conn.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if column not in cols:
+            self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
 
     def close(self) -> None:
         if conn := getattr(self._local, "conn", None):
