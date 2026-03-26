@@ -23,6 +23,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
 
+from jsonc_parser.parser import JsoncParser
 from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -199,13 +200,10 @@ def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]
 
 
 def _load_json(path: Path) -> dict[str, Any]:
-    """Load a JSON (or JSONC — JSON with // comments) file."""
-    text = path.read_text(encoding="utf-8")
-    # Strip single-line // comments (simple approach, not spec-complete)
-    lines = [re.sub(r"\s*//.*$", "", line) for line in text.splitlines()]
+    """Load a JSONC (or plain JSON) file using a proper JSONC parser."""
     try:
-        return json.loads("\n".join(lines))
-    except json.JSONDecodeError as exc:
+        return JsoncParser.parse_file(str(path))
+    except Exception as exc:
         raise ValueError(f"Invalid JSON in {path}: {exc}") from exc
 
 
@@ -250,7 +248,7 @@ def load_config(project_dir: Path | None = None) -> Config:
 
     # 5. OPENVIBE_CONFIG_CONTENT env var (inline JSON)
     if cfg_content := os.environ.get("OPENVIBE_CONFIG_CONTENT"):
-        raw = _deep_merge(raw, json.loads(cfg_content))
+        raw = _deep_merge(raw, JsoncParser.parse_str(cfg_content))
 
     raw = _expand_env(raw)
     config = Config.model_validate(raw)

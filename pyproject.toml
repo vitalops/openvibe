@@ -25,6 +25,7 @@ dependencies = [
     "sse-starlette>=2.1.0",
     "mistune>=3.0.0",
     "textual>=0.52.0",
+    "jsonc-parser>=1.1.5",
 ]
 
 [project.optional-dependencies]
