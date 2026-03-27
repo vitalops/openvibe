@@ -200,7 +200,6 @@ def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]
 
 
 def _load_json(path: Path) -> dict[str, Any]:
-    """Load a JSONC (or plain JSON) file using a proper JSONC parser."""
     try:
         return JsoncParser.parse_file(str(path))
     except Exception as exc:
