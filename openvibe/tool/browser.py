@@ -66,12 +66,14 @@ class WebBrowserTool(Tool):
         )
         if self._browser_type == "chrome":
             from selenium.webdriver.chrome.options import Options
+
             options = Options()
             options.add_argument("--headless=new")
             options.add_argument(f"--user-agent={ua}")
             options.add_experimental_option("excludeSwitches", ["enable-logging"])
         else:
             from selenium.webdriver.firefox.options import Options
+
             options = Options()
             options.add_argument("--headless")
             options.add_argument(f"--user-agent={ua}")

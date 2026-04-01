@@ -21,7 +21,9 @@ def _model_limits(model: str) -> tuple[int, int]:
     max_input: int = info["max_input_tokens"]
     max_output: int = info["max_output_tokens"]
     chunk_budget = int(max_input * _CHUNK_INPUT_FRACTION)
-    summary_tokens = int(min(_SUMMARY_OUTPUT_CEIL, max_output * _SUMMARY_OUTPUT_FRACTION))
+    summary_tokens = int(
+        min(_SUMMARY_OUTPUT_CEIL, max_output * _SUMMARY_OUTPUT_FRACTION)
+    )
     return chunk_budget, summary_tokens
 
 
