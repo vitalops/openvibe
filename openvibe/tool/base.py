@@ -151,6 +151,9 @@ class Tool(abc.ABC):
         """Execute the tool with *params* in *ctx*. Must be overridden."""
         ...
 
+    def cancel(self) -> None:
+        """Cancel a running execution. Override in subclasses that support it."""
+
     async def __call__(
         self, ctx: ToolContext, raw_args: str | dict[str, Any]
     ) -> ToolResult:
@@ -211,7 +214,9 @@ def create_default_registry() -> ToolRegistry:
     from openvibe.tool.grep_tool import GrepTool
     from openvibe.tool.read import ReadTool
     from openvibe.tool.todo import TodoReadTool, TodoWriteTool
+    from openvibe.tool.browser import WebBrowserTool
     from openvibe.tool.web_fetch import WebFetchTool
+    from openvibe.tool.web_search import WebSearchTool
     from openvibe.tool.write import WriteTool
 
     registry = ToolRegistry()
@@ -222,6 +227,8 @@ def create_default_registry() -> ToolRegistry:
         EditTool(),
         GlobTool(),
         GrepTool(),
+        WebSearchTool(),
+        WebBrowserTool(),
         WebFetchTool(),
         TodoWriteTool(),
         TodoReadTool(),

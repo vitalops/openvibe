@@ -25,6 +25,10 @@ dependencies = [
     "sse-starlette>=2.1.0",
     "mistune>=3.0.0",
     "textual>=0.52.0",
+    "ddgs>=9.0.0",
+    "selenium>=4.0.0",
+    "webdriver-manager>=4.0.0",
+    "beautifulsoup4>=4.12.0",
 ]
 
 [project.optional-dependencies]
@@ -48,7 +52,7 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
-ignore = ["N818"]  # exception names don't need to end in Error when used as signals
+ignore = ["N818"]
 
 [tool.mypy]
 python_version = "3.11"
@@ -58,3 +62,4 @@ plugins = ["pydantic.mypy"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = ["integration: live network tests (require internet access)"]
