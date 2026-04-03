@@ -1,29 +1,23 @@
 from __future__ import annotations
 
-import litellm
-
-from openvibe.config import load_config
+from openvibe.llm import (
+    Message,
+    TextDelta,
+    count_tokens,
+    create_default_backend,
+    model_context_limits,
+    resolve_model,
+)
 
 _CHUNK_INPUT_FRACTION = 0.10
 _SUMMARY_OUTPUT_FRACTION = 0.25
 _SUMMARY_OUTPUT_CEIL = 4096
 
 
-def _resolve_model() -> str:
-    config = load_config()
-    if config.model:
-        return f"{config.model.provider_id}/{config.model.model_id}"
-    return "azure/gpt-4.1"
-
-
 def _model_limits(model: str) -> tuple[int, int]:
-    info = litellm.get_model_info(model)
-    max_input: int = info["max_input_tokens"]
-    max_output: int = info["max_output_tokens"]
+    max_input, max_output = model_context_limits(model)
     chunk_budget = int(max_input * _CHUNK_INPUT_FRACTION)
-    summary_tokens = int(
-        min(_SUMMARY_OUTPUT_CEIL, max_output * _SUMMARY_OUTPUT_FRACTION)
-    )
+    summary_tokens = int(min(_SUMMARY_OUTPUT_CEIL, max_output * _SUMMARY_OUTPUT_FRACTION))
     return chunk_budget, summary_tokens
 
 
@@ -34,7 +28,7 @@ class Summarizer:
 
     @property
     def model(self) -> str:
-        return _resolve_model()
+        return resolve_model()
 
     def _ensure_limits(self) -> tuple[int, int]:
         if self._chunk_tokens is None or self._max_summary_tokens is None:
@@ -42,10 +36,7 @@ class Summarizer:
         return self._chunk_tokens, self._max_summary_tokens
 
     def _count_tokens(self, text: str) -> int:
-        return litellm.token_counter(
-            model=self.model,
-            messages=[{"role": "system", "content": text}],
-        )
+        return count_tokens(self.model, text)
 
     def _chunk_text(self, text: str) -> list[str]:
         chunk_size, _ = self._ensure_limits()
@@ -69,13 +60,17 @@ class Summarizer:
 
     async def _chat(self, prompt: str) -> str:
         _, max_summary_tokens = self._ensure_limits()
-        response = await litellm.acompletion(
+        backend = create_default_backend()
+        text = ""
+        async for event in await backend.stream(
             model=self.model,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[Message(role="user", content=prompt)],
             temperature=0,
             max_tokens=max_summary_tokens,
-        )
-        return response.choices[0].message.content or ""
+        ):
+            if isinstance(event, TextDelta):
+                text += event.content
+        return text
 
     async def qa_chunk(self, text: str, query: str) -> str:
         prompt = (

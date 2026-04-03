@@ -38,7 +38,8 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any, Protocol
-
+from openvibe.config import load_config
+import litellm
 # ---------------------------------------------------------------------------
 # Event types
 # ---------------------------------------------------------------------------
@@ -308,3 +309,27 @@ class LiteLLMBackend:
 def create_default_backend() -> LiteLLMBackend:
     """Return the default LiteLLM-backed LLM backend."""
     return LiteLLMBackend()
+
+
+def resolve_model() -> str:
+    """Return the litellm model string from the active openvibe config."""
+
+    config = load_config()
+    if config.model:
+        return f"{config.model.provider_id}/{config.model.model_id}"
+    return "azure/gpt-4.1"
+
+
+def count_tokens(model: str, text: str) -> int:
+    """Return the approximate token count for *text* under *model*."""
+    return litellm.token_counter(
+        model=model,
+        messages=[{"role": "system", "content": text}],
+    )
+
+
+def model_context_limits(model: str) -> tuple[int, int]:
+    """Return (max_input_tokens, max_output_tokens) for *model*."""
+
+    info = litellm.get_model_info(model)
+    return int(info["max_input_tokens"]), int(info["max_output_tokens"])
