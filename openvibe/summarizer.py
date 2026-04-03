@@ -17,7 +17,9 @@ _SUMMARY_OUTPUT_CEIL = 4096
 def _model_limits(model: str) -> tuple[int, int]:
     max_input, max_output = model_context_limits(model)
     chunk_budget = int(max_input * _CHUNK_INPUT_FRACTION)
-    summary_tokens = int(min(_SUMMARY_OUTPUT_CEIL, max_output * _SUMMARY_OUTPUT_FRACTION))
+    summary_tokens = int(
+        min(_SUMMARY_OUTPUT_CEIL, max_output * _SUMMARY_OUTPUT_FRACTION)
+    )
     return chunk_budget, summary_tokens
 
 

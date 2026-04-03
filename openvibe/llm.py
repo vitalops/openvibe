@@ -40,6 +40,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 from openvibe.config import load_config
 import litellm
+
 # ---------------------------------------------------------------------------
 # Event types
 # ---------------------------------------------------------------------------
