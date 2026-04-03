@@ -84,8 +84,12 @@ async def test_specific_query_returns_relevant_results(ctx, tool):
 
 
 async def test_pagination_returns_different_results(ctx, tool):
-    result_page1 = await tool(ctx, {"query": "openai", "num_results": 3, "start_page": 1})
-    result_page2 = await tool(ctx, {"query": "openai", "num_results": 3, "start_page": 2})
+    result_page1 = await tool(
+        ctx, {"query": "openai", "num_results": 3, "start_page": 1}
+    )
+    result_page2 = await tool(
+        ctx, {"query": "openai", "num_results": 3, "start_page": 2}
+    )
 
     assert not result_page1.error
     assert not result_page2.error
@@ -95,11 +99,12 @@ async def test_pagination_returns_different_results(ctx, tool):
 
 
 async def test_start_page_metadata_present(ctx, tool):
-    result = await tool(ctx, {"query": "linux kernel", "start_page": 2, "num_results": 3})
+    result = await tool(
+        ctx, {"query": "linux kernel", "start_page": 2, "num_results": 3}
+    )
 
     assert not result.error
     assert result.metadata["start_page"] == 2
-
 
 
 async def test_invalid_num_results_rejected(ctx, tool):
