@@ -16,6 +16,11 @@ from textual.binding import Binding
 from textual.widgets import Footer
 
 from openvibe.api import OpenVibe
+import os
+
+from openvibe.config import load_config
+from openvibe.provider.provider import get_provider
+
 
 _CSS = """
 Screen {
@@ -111,12 +116,30 @@ class OpenvibeApp(App[None]):
 
 def _needs_setup(project_dir: Path) -> bool:
     """Return True if no model is configured from any config source."""
-    from openvibe.config import load_config
-
     try:
-        return load_config(project_dir).model is None
+        config = load_config(project_dir)
     except Exception:
         return True
+
+    if config.model is None:
+        return True
+
+    provider_id = config.model.provider_id
+    provider_info = get_provider(provider_id)
+    if provider_info is None:
+        return False
+
+    pcfg = config.provider.get(provider_id)
+    if pcfg and pcfg.api_key:
+        return False
+
+    if provider_info.env_key and os.environ.get(provider_info.env_key):
+        return False
+
+    if provider_id == "azure" and os.environ.get("AZURE_OPENAI_API_KEY"):
+        return False
+
+    return True
 
 
 def run_tui(project_dir: Path | None = None) -> None:
