@@ -170,7 +170,8 @@ class SessionScreen(Screen):
 
             for i, part in enumerate(msg.parts):
                 if isinstance(part, TextPart):
-                    if role == "permission":
+                    if role in ("permission", "system"):
+                        # Rich markup — bypass the markdown pipeline.
                         widget.replace_text(part.content)
                     else:
                         widget.append_text(part.content)
@@ -221,11 +222,17 @@ class SessionScreen(Screen):
 
         # Slash commands — handled at the API level, but we intercept the
         # result here to avoid freezing the UI / showing a spinner.
-        from openvibe.commands import is_command
+        # Skills look like commands (/simplify, /plan, …) but are NOT in the
+        # command registry — they must go through the LLM path (_start_turn).
+        from openvibe.commands import get_command, has_command, is_command
 
         if is_command(event.text):
-            await self._handle_command(event.text)
-            return
+            parsed = get_command(event.text)
+            if parsed and has_command(parsed[0]):
+                await self._handle_command(event.text)
+                return
+            # Not a registered command — fall through to LLM path so that
+            # Session._try_skill() can expand it.
 
         input_bar = self.query_one(InputBar)
         input_bar.record_submission(event.text)
@@ -280,16 +287,19 @@ class SessionScreen(Screen):
             msg_list._messages.clear()
             return
 
-        # Persist and display the result as an assistant message.
+        # Persist and display the result as a system message.
+        # Command output is Rich markup, not markdown — use SYSTEM role so that
+        # it bypasses the markdown renderer (render_markdown / mistune) and is
+        # passed directly to Static.update() which interprets Rich markup tags.
         if result.output:
             reply_msg = session_store.add_message(
-                db, self._session_id, MessageRole.ASSISTANT,
+                db, self._session_id, MessageRole.SYSTEM,
                 [TextPart(content=result.output)],
             )
             result_widget = await msg_list.add_message(
-                reply_msg.id, str(MessageRole.ASSISTANT),
+                reply_msg.id, str(MessageRole.SYSTEM),
             )
-            result_widget.append_text(result.output)
+            result_widget.replace_text(result.output)
 
     # ------------------------------------------------------------------
     # Permission handling
