@@ -36,7 +36,7 @@ class SessionScreen(Screen):
     BINDINGS = [
         Binding("ctrl+s", "sessions", "Sessions", show=True),
         Binding("ctrl+n", "new_session", "New", show=True),
-        Binding("escape", "noop", ""),
+        Binding("escape", "cancel_turn", "Cancel", show=False),
     ]
 
     def __init__(self, session_id: str, **kwargs: Any) -> None:
@@ -263,7 +263,10 @@ class SessionScreen(Screen):
 
         # Persist and display the command as a user message.
         user_msg = session_store.add_message(
-            db, self._session_id, MessageRole.USER, [TextPart(content=text)],
+            db,
+            self._session_id,
+            MessageRole.USER,
+            [TextPart(content=text)],
         )
         widget = await msg_list.add_message(user_msg.id, "user")
         widget.append_text(text)
@@ -288,16 +291,19 @@ class SessionScreen(Screen):
             return
 
         # Persist and display the result as a system message.
-        # Command output is Rich markup, not markdown — use SYSTEM role so that
-        # it bypasses the markdown renderer (render_markdown / mistune) and is
-        # passed directly to Static.update() which interprets Rich markup tags.
+        # Command output is Rich markup, not markdown — use SYSTEM role so it
+        # bypasses the markdown/mistune pipeline and goes directly to
+        # Static.update(), which interprets Rich markup tags correctly.
         if result.output:
             reply_msg = session_store.add_message(
-                db, self._session_id, MessageRole.SYSTEM,
+                db,
+                self._session_id,
+                MessageRole.SYSTEM,
                 [TextPart(content=result.output)],
             )
             result_widget = await msg_list.add_message(
-                reply_msg.id, str(MessageRole.SYSTEM),
+                reply_msg.id,
+                str(MessageRole.SYSTEM),
             )
             result_widget.replace_text(result.output)
 
@@ -609,5 +615,11 @@ class SessionScreen(Screen):
             event.prevent_default()
             input_bar.post_message(InputBar.Submitted("3"))
 
-    def action_noop(self) -> None:
-        pass
+    def action_cancel_turn(self) -> None:
+        """Cancel the active agent turn (escape)."""
+        session = self.app.get_session(self._session_id)  # type: ignore[attr-defined]
+        if session.state != SessionState.THINKING:
+            return
+        session.abort()
+        self.query_one(InputBar).enable()
+        self._refresh_header()
