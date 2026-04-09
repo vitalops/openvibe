@@ -849,19 +849,25 @@ def test_run_with_plan_agent(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_send_after_error_state_raises(tmp_path):
-    """After the session enters ERROR, send() must raise InvalidStateError."""
+def test_send_after_error_state_recovers(tmp_path):
+    """After ERROR, send() should recover and start a new turn (not raise)."""
+    call_count = 0
 
-    def boom(model, messages, **kw):
-        raise RuntimeError("boom")
+    def flaky(model, messages, **kw):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise RuntimeError("boom")
+        return MockLLM({"try again": "recovered"})(model, messages, **kw)
 
-    with _ov(tmp_path, llm=boom) as ov:
+    with _ov(tmp_path, llm=flaky) as ov:
         session = ov.create_session()
         resp = session.send("anything")
         assert resp.state == SessionState.ERROR
-        # Session is now in ERROR state — send() must reject it
-        with pytest.raises(InvalidStateError):
-            session.send("try again")
+        # Session is now in ERROR state — send() should still work (recovery)
+        resp2 = session.send("try again")
+        assert resp2.state == SessionState.IDLE
+        assert "recovered" in resp2.text
 
 
 def test_reply_in_waiting_with_wrong_request_id_still_resumes(tmp_path):

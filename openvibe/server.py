@@ -327,7 +327,8 @@ def create_app(
         state: State,
     ) -> EventSourceResponse:
         """Send a user message and stream the assistant response via SSE."""
-        from openvibe.commands import is_command, get_command, execute, CommandContext
+        from openvibe.commands import (CommandContext, execute, get_command,
+                                       is_command)
 
         session = session_store.get(state.db, session_id)
         if not session:
@@ -341,7 +342,8 @@ def create_app(
             if parsed:
                 name, args = parsed
                 _s = type(
-                    "_S", (),
+                    "_S",
+                    (),
                     {
                         "info": session,
                         "_config": state.config,
@@ -353,7 +355,10 @@ def create_app(
 
                 async def _command_stream():
                     if result.output:
-                        yield {"event": "text_delta", "data": json.dumps({"content": result.output})}
+                        yield {
+                            "event": "text_delta",
+                            "data": json.dumps({"content": result.output}),
+                        }
                     yield {"event": "done", "data": "{}"}
 
                 return EventSourceResponse(_command_stream())
