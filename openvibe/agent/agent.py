@@ -166,15 +166,18 @@ def resolve(config: "Config", name: str | None = None) -> AgentInfo:
     """Return a fully resolved AgentInfo for *name* (or the default agent).
 
     User config overrides are merged on top of the built-in defaults.
+    Always returns a fresh copy — never mutates the global builtins.
     """
+    import dataclasses
+
     agent_name = name or config.default_agent or "build"
 
-    # Start from built-in or create a shell
-    base = _BUILTIN_AGENTS.get(agent_name) or AgentInfo(
-        name=agent_name,
-        description="",
-        system_prompt="",
-    )
+    # Start from built-in or create a shell — always copy to avoid mutating globals.
+    builtin = _BUILTIN_AGENTS.get(agent_name)
+    if builtin is not None:
+        base = dataclasses.replace(builtin)
+    else:
+        base = AgentInfo(name=agent_name, description="", system_prompt="")
 
     # Apply user overrides from config
     user_cfg: AgentConfig | None = config.agent.get(agent_name)

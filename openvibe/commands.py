@@ -76,7 +76,9 @@ def subcommand(parent: str, name: str, description: str):
 
     def decorator(fn):
         if parent not in _COMMANDS:
-            raise ValueError(f"Parent command /{parent} must be registered before subcommands")
+            raise ValueError(
+                f"Parent command /{parent} must be registered before subcommands"
+            )
         _COMMANDS[parent].subcommands[name] = (fn, description)
         return fn
 
@@ -107,7 +109,9 @@ def _fmt_subcommands(entry: _CommandEntry, name: str) -> str:
     """Format subcommand list for display."""
     lines = []
     for sub_name, (_, sub_desc) in sorted(entry.subcommands.items()):
-        lines.append(f"  [bold cyan]/{name} {sub_name}[/bold cyan]  [dim]{sub_desc}[/dim]")
+        lines.append(
+            f"  [bold cyan]/{name} {sub_name}[/bold cyan]  [dim]{sub_desc}[/dim]"
+        )
     return "\n".join(lines)
 
 
@@ -130,7 +134,9 @@ def execute(name: str, ctx: CommandContext) -> CommandResult:
         sub_entry = entry.subcommands.get(sub_name)
         if sub_entry is not None:
             sub_handler, _ = sub_entry
-            sub_ctx = CommandContext(session=ctx.session, args=parts[1] if len(parts) > 1 else "")
+            sub_ctx = CommandContext(
+                session=ctx.session, args=parts[1] if len(parts) > 1 else ""
+            )
             return sub_handler(sub_ctx)
         # Unknown subcommand — let the main handler deal with it (it may
         # treat args as parameters, like /model does).
@@ -161,7 +167,9 @@ def cmd_help(ctx: CommandContext) -> CommandResult:
     lines = ["[bold]Available commands:[/bold]\n"]
     for name in sorted(_COMMANDS):
         entry = _COMMANDS[name]
-        lines.append(f"  [bold cyan]/{name}[/bold cyan]  [dim]{entry.description}[/dim]")
+        lines.append(
+            f"  [bold cyan]/{name}[/bold cyan]  [dim]{entry.description}[/dim]"
+        )
         for sub_name, (_, sub_desc) in sorted(entry.subcommands.items()):
             lines.append(f"    [bold cyan]/{name} {sub_name}[/bold cyan]  [dim]{sub_desc}[/dim]")
 
@@ -232,7 +240,9 @@ def cmd_cost(ctx: CommandContext) -> CommandResult:
         return str(n)
 
     lines.append(f"  Input tokens:       [bold]{_fmt_tokens(info.input_tokens)}[/bold]")
-    lines.append(f"  Output tokens:      [bold]{_fmt_tokens(info.output_tokens)}[/bold]")
+    lines.append(
+        f"  Output tokens:      [bold]{_fmt_tokens(info.output_tokens)}[/bold]"
+    )
     if info.cache_read_tokens:
         lines.append(
             f"  Cache read tokens:  [bold]{_fmt_tokens(info.cache_read_tokens)}[/bold]"
@@ -352,8 +362,21 @@ def cmd_model(ctx: CommandContext) -> CommandResult:
             for pid in sorted(config.provider):
                 lines.append(f"  [dim]{pid}[/dim]")
 
-        lines.append("\n[dim]Usage: /model provider/model_id[/dim]")
+        lines.append(
+            "\n[dim]Usage: /model provider/model_id [--session|--project|--global][/dim]"
+        )
         return CommandResult(output="\n".join(lines))
+
+    # Parse scope flag from the end of the args string
+    scope = "session"
+    for flag in ("--session", "--global", "--project"):
+        if args.endswith(flag):
+            scope = flag[2:]
+            args = args[: -len(flag)].strip()
+            break
+
+    if not args:
+        return CommandResult(output="[red]Missing model argument.[/red]")
 
     # Switch model: /model provider/model_id
     if "/" in args:
@@ -363,12 +386,36 @@ def cmd_model(ctx: CommandContext) -> CommandResult:
         provider_id = config.model.provider_id if config.model else "anthropic"
         model_id = args
 
-    from openvibe.config import ModelRef
+    from openvibe.config import (ModelRef, save_model_to_global,
+                                 save_model_to_project)
 
-    config.model = ModelRef(provider_id=provider_id, model_id=model_id)
+    new_model = ModelRef(provider_id=provider_id, model_id=model_id)
+    model_dict = {"model": {"provider_id": provider_id, "model_id": model_id}}
+
+    if scope == "global":
+        path = save_model_to_global(new_model)
+        # Also apply to current session in-memory
+        ctx.session.update_session_config(model_dict)
+        return CommandResult(
+            output=f"[green]Model switched to:[/green] {provider_id}/{model_id}\n"
+            f"[dim]Saved to {path}[/dim]"
+        )
+
+    if scope == "project":
+        project_dir = _project_dir(ctx)
+        path = save_model_to_project(new_model, project_dir)
+        # Also apply to current session in-memory
+        ctx.session.update_session_config(model_dict)
+        return CommandResult(
+            output=f"[green]Model switched to:[/green] {provider_id}/{model_id}\n"
+            f"[dim]Saved to {path}[/dim]"
+        )
+
+    # session (default) — persists to DB so model survives session resume
+    ctx.session.update_session_config(model_dict)
     return CommandResult(
         output=f"[green]Model switched to:[/green] {provider_id}/{model_id}\n"
-        f"[dim]This change is for the current session only.[/dim]"
+        f"[dim]Saved to session.[/dim]"
     )
 
 
@@ -481,9 +528,7 @@ def cmd_init(ctx: CommandContext) -> CommandResult:
             {"tool": "file.*", "action": "allow"},
         ],
     }
-    config_path.write_text(
-        json.dumps(template, indent=2) + "\n", encoding="utf-8"
-    )
+    config_path.write_text(json.dumps(template, indent=2) + "\n", encoding="utf-8")
     return CommandResult(
         output=f"[green]Created:[/green] {config_path}\n\n"
         f"[dim]{json.dumps(template, indent=2)}[/dim]\n\n"

@@ -287,6 +287,51 @@ _PROVIDER_ENV: dict[str, tuple[str | None, str | None, str | None]] = {
 }
 
 
+GLOBAL_CONFIG_PATH = Path.home() / ".config" / "openvibe" / "openvibe.json"
+
+
+def _find_project_config(project_dir: Path) -> Path:
+    """Return the existing project config path, or the default location."""
+    for candidate in [
+        project_dir / "openvibe.json",
+        project_dir / "openvibe.jsonc",
+        project_dir / ".openvibe" / "openvibe.json",
+        project_dir / ".openvibe" / "openvibe.jsonc",
+    ]:
+        if candidate.exists():
+            return candidate
+    return project_dir / "openvibe.json"
+
+
+def _read_modify_write(path: Path, updates: dict[str, Any]) -> None:
+    """Read a JSON file, merge *updates* in, and write it back."""
+    existing: dict[str, Any] = {}
+    if path.exists():
+        existing = _load_json(path)
+    existing.update(updates)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
+
+
+def save_model_to_global(model: ModelRef) -> Path:
+    """Persist *model* to the global user config file."""
+    _read_modify_write(
+        GLOBAL_CONFIG_PATH,
+        {"model": {"provider_id": model.provider_id, "model_id": model.model_id}},
+    )
+    return GLOBAL_CONFIG_PATH
+
+
+def save_model_to_project(model: ModelRef, project_dir: Path) -> Path:
+    """Persist *model* to the project config file."""
+    path = _find_project_config(project_dir)
+    _read_modify_write(
+        path,
+        {"model": {"provider_id": model.provider_id, "model_id": model.model_id}},
+    )
+    return path
+
+
 def _apply_provider_env(config: Config) -> None:
     """Push provider config values into os.environ so litellm picks them up.
 
