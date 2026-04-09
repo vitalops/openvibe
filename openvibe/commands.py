@@ -98,6 +98,11 @@ def get_command(text: str) -> tuple[str, str] | None:
     return name, args
 
 
+def has_command(name: str) -> bool:
+    """Return True if *name* is a registered slash command."""
+    return name in _COMMANDS
+
+
 def _fmt_subcommands(entry: _CommandEntry, name: str) -> str:
     """Format subcommand list for display."""
     lines = []
@@ -151,7 +156,7 @@ def _config(ctx: CommandContext):
 # ---------------------------------------------------------------------------
 
 
-@command("help", "Show available commands")
+@command("help", "Show available commands and skills")
 def cmd_help(ctx: CommandContext) -> CommandResult:
     lines = ["[bold]Available commands:[/bold]\n"]
     for name in sorted(_COMMANDS):
@@ -159,6 +164,52 @@ def cmd_help(ctx: CommandContext) -> CommandResult:
         lines.append(f"  [bold cyan]/{name}[/bold cyan]  [dim]{entry.description}[/dim]")
         for sub_name, (_, sub_desc) in sorted(entry.subcommands.items()):
             lines.append(f"    [bold cyan]/{name} {sub_name}[/bold cyan]  [dim]{sub_desc}[/dim]")
+
+    # Show user-invocable skills section.
+    try:
+        from rich.markup import escape
+
+        from openvibe.skill.base import get_registry
+        skills = get_registry().user_invocable()
+        if skills:
+            lines.append("\n[bold]Available skills[/bold] [dim](expanded by LLM):[/dim]\n")
+            for skill in sorted(skills, key=lambda s: s.name):
+                hint = f" {escape(skill.argument_hint)}" if skill.argument_hint else ""
+                aliases = f"  [dim]aliases: {escape(', '.join('/' + a for a in skill.aliases))}[/dim]" if skill.aliases else ""
+                lines.append(
+                    f"  [bold cyan]/{escape(skill.name)}{hint}[/bold cyan]  [dim]{escape(skill.description)}[/dim]{aliases}"
+                )
+    except Exception:
+        pass
+
+    return CommandResult(output="\n".join(lines))
+
+
+@command("skills", "List available skills (LLM-driven slash commands)")
+def cmd_skills(ctx: CommandContext) -> CommandResult:
+    try:
+        from openvibe.skill.base import get_registry
+        skills = get_registry().user_invocable()
+    except Exception as exc:
+        return CommandResult(output=f"[red]Could not load skills:[/red] {exc}")
+
+    if not skills:
+        return CommandResult(output="[dim]No skills registered.[/dim]")
+
+    from rich.markup import escape
+
+    lines = ["[bold]Available skills[/bold] [dim](each expands into an LLM prompt):[/dim]\n"]
+    for skill in sorted(skills, key=lambda s: s.name):
+        hint = f" {escape(skill.argument_hint)}" if skill.argument_hint else ""
+        lines.append(f"  [bold cyan]/{escape(skill.name)}{hint}[/bold cyan]")
+        lines.append(f"    [dim]{escape(skill.description)}[/dim]")
+        if skill.when_to_use:
+            lines.append(f"    [dim italic]When: {escape(skill.when_to_use)}[/dim italic]")
+        if skill.aliases:
+            aliases_str = escape(", ".join(f"/{a}" for a in skill.aliases))
+            lines.append(f"    [dim]Aliases: {aliases_str}[/dim]")
+        lines.append("")
+
     return CommandResult(output="\n".join(lines))
 
 

@@ -212,8 +212,8 @@ class Session:
     # ------------------------------------------------------------------
 
     def _try_command(self, text: str) -> Response | None:
-        """If *text* is a slash command, execute it and return a Response."""
-        from openvibe.commands import CommandContext, get_command, execute, is_command
+        """If *text* is a registered slash command, execute it and return a Response."""
+        from openvibe.commands import CommandContext, get_command, execute, has_command, is_command
 
         if not is_command(text):
             return None
@@ -221,6 +221,8 @@ class Session:
         if parsed is None:
             return None
         name, args = parsed
+        if not has_command(name):
+            return None  # Not a registered command — let _try_skill handle it.
         ctx = CommandContext(session=self, args=args)
         result = execute(name, ctx)
         return Response(
@@ -228,6 +230,27 @@ class Session:
             text=result.output,
             command_result=result,
         )
+
+    def _try_skill(self, text: str) -> str | None:
+        """If *text* is a skill invocation, return the expanded prompt.
+
+        Skills look like slash commands (``/simplify``, ``/gc``, etc.) but
+        instead of executing locally they expand into a prompt that is sent
+        to the LLM.  Command detection runs first, so registered commands
+        always win over same-named skills.
+        """
+        from openvibe.commands import is_command
+        from openvibe.skill.base import get_registry
+
+        if not is_command(text):
+            return None
+        parts = text[1:].split(None, 1)
+        name = parts[0].lower()
+        args = parts[1] if len(parts) > 1 else ""
+        skill = get_registry().get(name)
+        if skill is None:
+            return None
+        return skill.get_prompt(args)
 
     def send(
         self,
@@ -253,6 +276,11 @@ class Session:
         cmd_response = self._try_command(text)
         if cmd_response is not None:
             return cmd_response
+
+        # Skills expand to a prompt and are forwarded to the LLM.
+        expanded = self._try_skill(text)
+        if expanded is not None:
+            text = expanded
 
         with self._lock:
             if self._state != SessionState.IDLE:
@@ -312,6 +340,11 @@ class Session:
             if callback:
                 callback(cmd_response)
             return
+
+        # Skills expand to a prompt and are forwarded to the LLM.
+        expanded = self._try_skill(text)
+        if expanded is not None:
+            text = expanded
 
         with self._lock:
             if self._state != SessionState.IDLE:
@@ -551,6 +584,7 @@ class OpenVibe:
         from openvibe.config import load_config
         from openvibe.db import create_database
         from openvibe.project import project as _project_module
+        from openvibe.skill.bundled import init_bundled_skills
         from openvibe.tool.base import create_default_registry
 
         if self._config is None:
@@ -564,6 +598,7 @@ class OpenVibe:
         if self._config.mcp:
             self._init_mcp()
 
+        init_bundled_skills()
         return self
 
     def close(self) -> None:
@@ -617,6 +652,9 @@ class OpenVibe:
             self._db, llm, self._bus, self._registry, self._permissions
         )
         self._llm = llm
+
+        from openvibe.skill.bundled import init_bundled_skills
+        init_bundled_skills()
         return self
 
     async def close_async(self) -> None:
