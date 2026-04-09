@@ -13,12 +13,18 @@ class DebugSkill(SkillDefinition):
     description = "Systematically diagnose and fix a bug or error."
     aliases: list[str] = []
     user_invocable = True
-    when_to_use = "When you have an error, failing test, or unexpected behaviour to investigate."
+    when_to_use = (
+        "When you have an error, failing test, or unexpected behaviour to investigate."
+    )
     argument_hint = "[error message or description]"
 
     def get_prompt(self, args: str) -> str:
-        problem = f"Problem to debug: {args.strip()}" if args.strip() else (
-            "Identify the most recent error or failing behaviour in this session."
+        problem = (
+            f"Problem to debug: {args.strip()}"
+            if args.strip()
+            else (
+                "Identify the most recent error or failing behaviour in this session."
+            )
         )
         return f"""\
 {problem}

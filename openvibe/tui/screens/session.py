@@ -291,9 +291,6 @@ class SessionScreen(Screen):
             return
 
         # Persist and display the result as a system message.
-        # Command output is Rich markup, not markdown — use SYSTEM role so it
-        # bypasses the markdown/mistune pipeline and goes directly to
-        # Static.update(), which interprets Rich markup tags correctly.
         if result.output:
             reply_msg = session_store.add_message(
                 db,

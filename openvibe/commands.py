@@ -171,19 +171,28 @@ def cmd_help(ctx: CommandContext) -> CommandResult:
             f"  [bold cyan]/{name}[/bold cyan]  [dim]{entry.description}[/dim]"
         )
         for sub_name, (_, sub_desc) in sorted(entry.subcommands.items()):
-            lines.append(f"    [bold cyan]/{name} {sub_name}[/bold cyan]  [dim]{sub_desc}[/dim]")
+            lines.append(
+                f"    [bold cyan]/{name} {sub_name}[/bold cyan]  [dim]{sub_desc}[/dim]"
+            )
 
     # Show user-invocable skills section.
     try:
         from rich.markup import escape
 
         from openvibe.skill.base import get_registry
+
         skills = get_registry().user_invocable()
         if skills:
-            lines.append("\n[bold]Available skills[/bold] [dim](expanded by LLM):[/dim]\n")
+            lines.append(
+                "\n[bold]Available skills[/bold] [dim](expanded by LLM):[/dim]\n"
+            )
             for skill in sorted(skills, key=lambda s: s.name):
                 hint = f" {escape(skill.argument_hint)}" if skill.argument_hint else ""
-                aliases = f"  [dim]aliases: {escape(', '.join('/' + a for a in skill.aliases))}[/dim]" if skill.aliases else ""
+                aliases = (
+                    f"  [dim]aliases: {escape(', '.join('/' + a for a in skill.aliases))}[/dim]"
+                    if skill.aliases
+                    else ""
+                )
                 lines.append(
                     f"  [bold cyan]/{escape(skill.name)}{hint}[/bold cyan]  [dim]{escape(skill.description)}[/dim]{aliases}"
                 )
@@ -197,6 +206,7 @@ def cmd_help(ctx: CommandContext) -> CommandResult:
 def cmd_skills(ctx: CommandContext) -> CommandResult:
     try:
         from openvibe.skill.base import get_registry
+
         skills = get_registry().user_invocable()
     except Exception as exc:
         return CommandResult(output=f"[red]Could not load skills:[/red] {exc}")
@@ -206,13 +216,17 @@ def cmd_skills(ctx: CommandContext) -> CommandResult:
 
     from rich.markup import escape
 
-    lines = ["[bold]Available skills[/bold] [dim](each expands into an LLM prompt):[/dim]\n"]
+    lines = [
+        "[bold]Available skills[/bold] [dim](each expands into an LLM prompt):[/dim]\n"
+    ]
     for skill in sorted(skills, key=lambda s: s.name):
         hint = f" {escape(skill.argument_hint)}" if skill.argument_hint else ""
         lines.append(f"  [bold cyan]/{escape(skill.name)}{hint}[/bold cyan]")
         lines.append(f"    [dim]{escape(skill.description)}[/dim]")
         if skill.when_to_use:
-            lines.append(f"    [dim italic]When: {escape(skill.when_to_use)}[/dim italic]")
+            lines.append(
+                f"    [dim italic]When: {escape(skill.when_to_use)}[/dim italic]"
+            )
         if skill.aliases:
             aliases_str = escape(", ".join(f"/{a}" for a in skill.aliases))
             lines.append(f"    [dim]Aliases: {aliases_str}[/dim]")
@@ -386,8 +400,7 @@ def cmd_model(ctx: CommandContext) -> CommandResult:
         provider_id = config.model.provider_id if config.model else "anthropic"
         model_id = args
 
-    from openvibe.config import (ModelRef, save_model_to_global,
-                                 save_model_to_project)
+    from openvibe.config import ModelRef, save_model_to_global, save_model_to_project
 
     new_model = ModelRef(provider_id=provider_id, model_id=model_id)
     model_dict = {"model": {"provider_id": provider_id, "model_id": model_id}}
