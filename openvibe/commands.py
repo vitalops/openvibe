@@ -151,7 +151,7 @@ def _config(ctx: CommandContext):
 # ---------------------------------------------------------------------------
 
 
-@command("help", "Show available commands")
+@command("help", "Show available commands and skills")
 def cmd_help(ctx: CommandContext) -> CommandResult:
     lines = ["[bold]Available commands:[/bold]\n"]
     for name in sorted(_COMMANDS):
@@ -159,6 +159,62 @@ def cmd_help(ctx: CommandContext) -> CommandResult:
         lines.append(f"  [bold cyan]/{name}[/bold cyan]  [dim]{entry.description}[/dim]")
         for sub_name, (_, sub_desc) in sorted(entry.subcommands.items()):
             lines.append(f"    [bold cyan]/{name} {sub_name}[/bold cyan]  [dim]{sub_desc}[/dim]")
+
+    # Append skills section
+    try:
+        from rich.markup import escape
+
+        from openvibe.skill.registry import get_registry
+        skills = get_registry().user_invocable()
+        if skills:
+            lines.append("\n[bold]Skills[/bold] [dim](route through the LLM):[/dim]\n")
+            for skill in skills:
+                aliases = (
+                    f"  [dim]alias: {', '.join(f'/{a}' for a in skill.aliases)}[/dim]"
+                    if skill.aliases
+                    else ""
+                )
+                hint = f" [dim]{escape(skill.argument_hint)}[/dim]" if skill.argument_hint else ""
+                lines.append(
+                    f"  [bold cyan]/{escape(skill.name)}[/bold cyan]{hint}"
+                    f"  [dim]{escape(skill.description)}[/dim]{aliases}"
+                )
+    except Exception:
+        pass
+
+    return CommandResult(output="\n".join(lines))
+
+
+@command("skills", "List available skills")
+def cmd_skills(ctx: CommandContext) -> CommandResult:
+    """Show all user-invocable skills with metadata."""
+    try:
+        from openvibe.skill.registry import get_registry
+    except ImportError:
+        return CommandResult(output="[dim]Skills system not available.[/dim]")
+
+    skills = get_registry().user_invocable()
+    if not skills:
+        return CommandResult(output="[dim]No skills registered.[/dim]")
+
+    from rich.markup import escape
+
+    lines = ["[bold]Available skills:[/bold]\n"]
+    for skill in skills:
+        lines.append(f"[bold cyan]/{escape(skill.name)}[/bold cyan]")
+        if skill.aliases:
+            lines[-1] += f"  [dim](aliases: {', '.join(f'/{a}' for a in skill.aliases)})[/dim]"
+        lines.append(f"  [dim]{escape(skill.description)}[/dim]")
+        if skill.when_to_use:
+            lines.append(f"  [yellow]When to use:[/yellow] [dim]{escape(skill.when_to_use)}[/dim]")
+        if skill.argument_hint:
+            lines.append(
+                f"  [yellow]Usage:[/yellow] [dim]/{escape(skill.name)} {escape(skill.argument_hint)}[/dim]"
+            )
+        if skill.tags:
+            lines.append(f"  [yellow]Tags:[/yellow] [dim]{escape(', '.join(skill.tags))}[/dim]")
+        lines.append("")
+
     return CommandResult(output="\n".join(lines))
 
 

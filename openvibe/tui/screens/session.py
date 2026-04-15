@@ -221,11 +221,17 @@ class SessionScreen(Screen):
 
         # Slash commands — handled at the API level, but we intercept the
         # result here to avoid freezing the UI / showing a spinner.
-        from openvibe.commands import is_command
+        # Skill invocations (/skillname args) look like commands but go to
+        # the LLM; route them through _start_turn instead.
+        from openvibe.commands import _COMMANDS, is_command  # noqa: PLC2701
 
         if is_command(event.text):
-            await self._handle_command(event.text)
-            return
+            parts = event.text[1:].split(None, 1)
+            name = parts[0].lower() if parts else ""
+            if name in _COMMANDS:
+                await self._handle_command(event.text)
+                return
+            # Not a registered command — fall through to LLM path (skill).
 
         input_bar = self.query_one(InputBar)
         input_bar.record_submission(event.text)
@@ -289,7 +295,7 @@ class SessionScreen(Screen):
             result_widget = await msg_list.add_message(
                 reply_msg.id, str(MessageRole.ASSISTANT),
             )
-            result_widget.append_text(result.output)
+            result_widget.set_markup(result.output)
 
     # ------------------------------------------------------------------
     # Permission handling
