@@ -100,6 +100,30 @@ def test_resolve_global_model_applied_when_agent_has_none():
     assert agent.model == global_model
 
 
+def test_resolve_does_not_mutate_builtins():
+    """Calling resolve() must not mutate the global _BUILTIN_AGENTS dict.
+
+    Regression: resolve() used to set base.model on the shared builtin, so a
+    subsequent call with a different config.model would still see the old model.
+    """
+    from openvibe.agent.agent import _BUILTIN_AGENTS
+
+    original_model = _BUILTIN_AGENTS["build"].model  # should be None
+
+    model_a = ModelRef(provider_id="anthropic", model_id="claude-3")
+    model_b = ModelRef(provider_id="azure", model_id="gpt-4.1")
+
+    agent_a = resolve(Config(model=model_a), "build")
+    assert agent_a.model == model_a
+
+    # The builtin must NOT have been mutated
+    assert _BUILTIN_AGENTS["build"].model == original_model
+
+    # A second resolve with a different model must pick it up
+    agent_b = resolve(Config(model=model_b), "build")
+    assert agent_b.model == model_b
+
+
 def test_resolve_agent_model_overrides_global():
     global_model = ModelRef(provider_id="anthropic", model_id="claude-3")
     agent_model = ModelRef(provider_id="openai", model_id="gpt-4o")

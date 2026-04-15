@@ -36,7 +36,7 @@ class SessionScreen(Screen):
     BINDINGS = [
         Binding("ctrl+s", "sessions", "Sessions", show=True),
         Binding("ctrl+n", "new_session", "New", show=True),
-        Binding("escape", "noop", ""),
+        Binding("escape", "cancel_turn", "Cancel", show=False),
     ]
 
     def __init__(self, session_id: str, **kwargs: Any) -> None:
@@ -262,7 +262,10 @@ class SessionScreen(Screen):
 
         # Persist and display the command as a user message.
         user_msg = session_store.add_message(
-            db, self._session_id, MessageRole.USER, [TextPart(content=text)],
+            db,
+            self._session_id,
+            MessageRole.USER,
+            [TextPart(content=text)],
         )
         widget = await msg_list.add_message(user_msg.id, "user")
         widget.append_text(text)
@@ -289,11 +292,14 @@ class SessionScreen(Screen):
         # Persist and display the result as an assistant message.
         if result.output:
             reply_msg = session_store.add_message(
-                db, self._session_id, MessageRole.ASSISTANT,
+                db,
+                self._session_id,
+                MessageRole.ASSISTANT,
                 [TextPart(content=result.output)],
             )
             result_widget = await msg_list.add_message(
-                reply_msg.id, str(MessageRole.ASSISTANT),
+                reply_msg.id,
+                str(MessageRole.ASSISTANT),
             )
             result_widget.set_markup(result.output)
 
@@ -605,5 +611,11 @@ class SessionScreen(Screen):
             event.prevent_default()
             input_bar.post_message(InputBar.Submitted("3"))
 
-    def action_noop(self) -> None:
-        pass
+    def action_cancel_turn(self) -> None:
+        """Cancel the active agent turn (escape)."""
+        session = self.app.get_session(self._session_id)  # type: ignore[attr-defined]
+        if session.state != SessionState.THINKING:
+            return
+        session.abort()
+        self.query_one(InputBar).enable()
+        self._refresh_header()

@@ -90,6 +90,14 @@ def update_cost(
     )
 
 
+def update_config(db: "Database", session_id: str, config_json: str | None) -> None:
+    """Persist session-level config overrides (JSON string or None to clear)."""
+    db.execute(
+        "UPDATE sessions SET config_json = ?, updated_at = ? WHERE id = ?",
+        (config_json, now_iso(), session_id),
+    )
+
+
 def archive(db: "Database", session_id: str) -> None:
     db.execute(
         "UPDATE sessions SET archived_at = ?, updated_at = ? WHERE id = ?",

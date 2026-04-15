@@ -572,8 +572,16 @@ class SessionProcessor:
         # Inject DB reference for tools that need it (todo, etc.)
         ctx._db = self._db  # type: ignore[attr-defined]
 
+        async def _abort_watcher() -> None:
+            """Wait for the abort event, then cancel the tool."""
+            while not abort.is_set():
+                await asyncio.sleep(0.1)
+            tool.cancel()
+
+        watcher = asyncio.create_task(_abort_watcher())
         try:
-            return await tool(ctx, args)
+            result = await tool(ctx, args)
+            return result
         except Exception as exc:
             from openvibe.permission.permission import (PermissionDenied,
                                                         PermissionRejected)
@@ -585,6 +593,8 @@ class SessionProcessor:
                     error=True,
                 )
             return ToolResult(title=f"Error in {name}", output=str(exc), error=True)
+        finally:
+            watcher.cancel()
 
 
 # ---------------------------------------------------------------------------

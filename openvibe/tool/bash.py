@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import signal
 
 from pydantic import Field
 
@@ -17,6 +19,9 @@ class BashTool(Tool):
         "shell task. Prefer short-lived commands; long-running processes "
         "should be backgrounded explicitly."
     )
+
+    def __init__(self) -> None:
+        self._proc: asyncio.subprocess.Process | None = None
 
     class Params(Tool.Params):
         command: str = Field(description="The bash command to run.")
@@ -51,16 +56,15 @@ class BashTool(Tool):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=ctx.working_dir,
+                preexec_fn=os.setsid,
             )
+            self._proc = proc
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(),
                 timeout=params.timeout,
             )
         except asyncio.TimeoutError:
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
+            self._kill_proc()
             return ToolResult(
                 title=f"$ {params.command}",
                 output=f"Command timed out after {params.timeout}s.",
@@ -68,6 +72,8 @@ class BashTool(Tool):
             )
         except Exception as exc:
             return ToolResult(title=f"$ {params.command}", output=str(exc), error=True)
+        finally:
+            self._proc = None
 
         combined = ""
         if stdout:
@@ -80,3 +86,16 @@ class BashTool(Tool):
             output=combined.strip() or "(no output)",
             error=proc.returncode != 0,
         )
+
+    def cancel(self) -> None:
+        """Kill the running subprocess process group."""
+        self._kill_proc()
+
+    def _kill_proc(self) -> None:
+        proc = self._proc
+        if proc is None or proc.returncode is not None:
+            return
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        except (ProcessLookupError, OSError):
+            pass
