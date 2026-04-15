@@ -234,6 +234,13 @@ class MessageWidget(Widget):
                 self._text += safe
             widget.update(self._text)
 
+    def set_markup(self, content: str) -> None:
+        """Display pre-rendered Rich markup directly, bypassing markdown processing."""
+        widget = self._simple_widget()
+        widget.remove_class("hidden-text")
+        self._text = content
+        widget.update(content)
+
     def replace_text(self, content: str) -> None:
         self._text = content
         if self._role == "assistant":

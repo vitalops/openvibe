@@ -64,7 +64,7 @@ class WebFetchTool(Tool):
             async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
                 response = await client.get(
                     params.url,
-                    headers={"User-Agent: openvibe/0.1 (AI coding agent))"},
+                    headers={"User-Agent": "openvibe/0.1 (AI coding agent)"},
                 )
                 response.raise_for_status()
         except httpx.TimeoutException:

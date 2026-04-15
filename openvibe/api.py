@@ -266,9 +266,12 @@ class Session:
     # ------------------------------------------------------------------
 
     def _try_command(self, text: str) -> Response | None:
-        """If *text* is a slash command, execute it and return a Response."""
-        from openvibe.commands import (CommandContext, execute, get_command,
-                                       is_command)
+        """If *text* is a registered slash command, execute it and return a Response.
+
+        Returns ``None`` for unrecognised names so that ``_try_skill`` can
+        handle skill invocations before we fall through to the LLM.
+        """
+        from openvibe.commands import CommandContext, _COMMANDS, execute, get_command, is_command  # noqa: PLC2701
 
         if not is_command(text):
             return None
@@ -276,6 +279,10 @@ class Session:
         if parsed is None:
             return None
         name, args = parsed
+        # Only handle names that are registered as slash commands; unknown
+        # names may be skill invocations — let _try_skill decide.
+        if name not in _COMMANDS:
+            return None
         ctx = CommandContext(session=self, args=args)
         result = execute(name, ctx)
         return Response(
@@ -283,6 +290,40 @@ class Session:
             text=result.output,
             command_result=result,
         )
+
+    def _try_skill(self, text: str) -> str | None:
+        """If *text* is a skill invocation (``/name args``), return the expanded prompt.
+
+        Returns ``None`` when the text is not a skill invocation so that the
+        caller can fall through to the normal LLM path.
+        """
+        from openvibe.commands import is_command
+        from openvibe.skill.registry import get_registry
+
+        if not is_command(text):
+            return None
+        parts = text[1:].split(None, 1)
+        name = parts[0].lower()
+        args = parts[1] if len(parts) > 1 else ""
+        skill = get_registry().get(name)
+        if skill is None:
+            return None
+        return skill.get_prompt(args)
+
+    def _send_raw(
+        self,
+        text: str,
+        on_token: Callable[[str], None] | None = None,
+    ) -> Response:
+        """Send *text* directly to the LLM without command/skill interception.
+
+        Used internally by the :class:`~openvibe.skill.executor.SkillExecutor`
+        so that retry prompts bypass the skill expansion layer.  Assumes the
+        FSM is already in THINKING state when called from within the skill
+        executor loop.
+        """
+        self._launch_worker(text, on_token, callback=None)
+        return self._collect()
 
     def send(
         self,
@@ -299,15 +340,21 @@ class Session:
         * an error occurs             → Response(state=ERROR)
 
         Slash commands (``/help``, ``/cost``, etc.) are handled locally and
-        never reach the LLM.
+        never reach the LLM.  Skill invocations (``/simplify``, ``/debug``,
+        etc.) are expanded into full LLM prompts before being sent.
 
         *on_message(msg_id, role)* — called when a new message is created.
         *on_tool(msg_id, part_index, state_dict)* — called on tool state changes.
         """
-        # Slash commands bypass the LLM entirely.
+        # 1. Slash commands bypass the LLM entirely.
         cmd_response = self._try_command(text)
         if cmd_response is not None:
             return cmd_response
+
+        # 2. Skill invocations: expand prompt before sending to LLM.
+        expanded = self._try_skill(text)
+        if expanded is not None:
+            text = expanded
 
         with self._lock:
             if self._state not in (SessionState.IDLE, SessionState.ERROR):
@@ -367,6 +414,11 @@ class Session:
             if callback:
                 callback(cmd_response)
             return
+
+        # Skill invocations: expand prompt before sending to LLM.
+        expanded = self._try_skill(text)
+        if expanded is not None:
+            text = expanded
 
         with self._lock:
             if self._state not in (SessionState.IDLE, SessionState.ERROR):
@@ -606,6 +658,8 @@ class OpenVibe:
         from openvibe.config import load_config
         from openvibe.db import create_database
         from openvibe.project import project as _project_module
+        from openvibe.skill.bundled import init_bundled_skills
+        from openvibe.skill.loader import load_skills_dir
         from openvibe.tool.base import create_default_registry
 
         if self._config is None:
@@ -615,6 +669,9 @@ class OpenVibe:
             self._db = create_database()
         self._registry = create_default_registry()
         self._project = _project_module.get_or_create(self._db, self._project_dir)
+
+        init_bundled_skills()
+        load_skills_dir(self._project_dir / "skills")
 
         if self._config.mcp:
             self._init_mcp()
@@ -648,12 +705,17 @@ class OpenVibe:
         from openvibe.permission.permission import PermissionService
         from openvibe.project import project as _project_module
         from openvibe.session.processor import SessionProcessor
+        from openvibe.skill.bundled import init_bundled_skills
+        from openvibe.skill.loader import load_skills_dir
         from openvibe.tool.base import create_default_registry
 
         if self._config is None:
             self._config = load_config(self._project_dir)
         if self._db is None:
             self._db = create_database()
+
+        init_bundled_skills()
+        load_skills_dir(self._project_dir / "skills")
 
         llm = self._llm or create_default_backend()
         self._bus = EventBus()
