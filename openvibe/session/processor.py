@@ -25,6 +25,7 @@ can trigger compaction (see ``compaction.py``).
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import time
 from dataclasses import dataclass
@@ -336,6 +337,19 @@ class SessionProcessor:
                         tool_part.state.time_end = time.monotonic() - t0
                         if result.error:
                             tool_part.state.error = result.output
+
+                        # Persist the first image attachment (e.g. screenshot)
+                        # so it can be forwarded to the LLM on the next turn.
+                        for att in result.attachments:
+                            if att.media_type.startswith("image/"):
+                                tool_part.state.metadata["image_b64"] = (
+                                    base64.b64encode(att.content).decode("ascii")
+                                )
+                                tool_part.state.metadata["image_media_type"] = (
+                                    att.media_type
+                                )
+                                break
+
                         session_store.upsert_part(
                             self._db, assistant_msg.id, part_idx, tool_part
                         )
@@ -670,18 +684,43 @@ def _to_llm_messages(history: list[MessageInfo], agent: "AgentInfo") -> list[Mes
                 # output is None — emit a synthetic result so the LLM message
                 # sequence remains valid (every tool_call needs a matching result).
                 for part in tool_parts:
-                    content = (
+                    output_text = (
                         part.state.output
                         if part.state.output is not None
                         else "Tool execution was interrupted (session was closed before the tool completed)."
                     )
-                    messages.append(
-                        Message(
-                            role="tool",
-                            content=content,
-                            tool_call_id=part.state.call_id,
-                        )
+                    image_b64: str | None = part.state.metadata.get("image_b64")
+                    image_media_type: str = part.state.metadata.get(
+                        "image_media_type", "image/png"
                     )
+
+                    if image_b64:
+                        # Build a vision-capable tool result: image first so the
+                        # model sees it before the caption, then the text caption.
+                        content_blocks = [
+                            ContentBlock(
+                                type="image_url",
+                                image_url={
+                                    "url": f"data:{image_media_type};base64,{image_b64}"
+                                },
+                            ),
+                            ContentBlock(type="text", text=output_text),
+                        ]
+                        messages.append(
+                            Message(
+                                role="tool",
+                                content=content_blocks,
+                                tool_call_id=part.state.call_id,
+                            )
+                        )
+                    else:
+                        messages.append(
+                            Message(
+                                role="tool",
+                                content=output_text,
+                                tool_call_id=part.state.call_id,
+                            )
+                        )
 
     return messages
 

@@ -82,6 +82,47 @@ information, search code, fetch web resources, and return findings.
 You do not write or modify files.
 """
 
+_COMPUTER_SYSTEM_PROMPT = """\
+You are openvibe in computer-use mode. You can see and control the desktop.
+
+TOOL PRIORITY — always follow this order:
+
+1. ui tool (FIRST CHOICE — no coordinates needed, most reliable)
+   • Use `ui get_tree` to list clickable elements in an app by name.
+   • Use `ui click` with the element title — never guess coordinates.
+   • Use `ui click_menu` to trigger menu items (File → Save, etc.).
+   • Use `ui type` to enter text — handles Unicode and clipboard correctly.
+   • Use `ui press_key` for keys/chords (return, escape, cmd+s, etc.).
+   • ui is auto-allowed — no permission prompt.
+
+2. app tool — open, close, focus, list applications.
+
+3. screenshot tool — take a screenshot to observe the current screen state.
+   Always take one after opening an app to confirm it appeared.
+   The output includes the image dimensions — note them for step 4.
+
+4. mouse tool (LAST RESORT — only for unlabelled canvas areas)
+   • Only use when `ui get_tree` shows no accessible elements for the target.
+   • ALWAYS provide image_width and image_height from the screenshot output.
+     This is mandatory — without them, Retina scaling causes wrong coordinates.
+   • Example: mouse click x=450 y=300 image_width=1920 image_height=1200
+
+5. keyboard tool — raw keystroke fallback when `ui type` / `ui press_key`
+   cannot be used (rare).
+
+WORKFLOW:
+  app open → screenshot → ui get_tree → ui click/type → screenshot → verify
+
+VERIFICATION:
+  Every screenshot compares automatically to the previous one and reports
+  what percentage of the screen changed. If you see "No visible change
+  detected" after an action, the action failed — do NOT repeat it blindly.
+  Instead: try ui get_tree to find the element by name, or take a fresh
+  screenshot and reassess coordinates.
+
+Never move the mouse to (0, 0) — that triggers pyautogui's failsafe abort.
+"""
+
 
 # ---------------------------------------------------------------------------
 # Built-in permission rulesets
@@ -125,6 +166,23 @@ _GENERAL_RULES: list[Rule] = [
     Rule(tool="bash", action=_A.DENY),
 ]
 
+# Computer-use: screenshot + ui (accessibility) are always allowed;
+# raw mouse/keyboard/app require consent (they affect the running system).
+_COMPUTER_RULES: list[Rule] = [
+    Rule(tool="screenshot", action=_A.ALLOW),
+    Rule(tool="ui", action=_A.ALLOW),   # AppleScript accessibility — preferred over mouse
+    Rule(tool="mouse", action=_A.ASK),
+    Rule(tool="keyboard", action=_A.ASK),
+    Rule(tool="app", action=_A.ASK),
+    # Standard tools remain available
+    Rule(tool="read", action=_A.ALLOW),
+    Rule(tool="glob", action=_A.ALLOW),
+    Rule(tool="grep", action=_A.ALLOW),
+    Rule(tool="bash", action=_A.ASK),
+    Rule(tool="write", action=_A.ASK),
+    Rule(tool="edit", action=_A.ASK),
+]
+
 
 # ---------------------------------------------------------------------------
 # Built-in agent definitions
@@ -153,6 +211,16 @@ _BUILTIN_AGENTS: dict[str, AgentInfo] = {
         mode=AgentMode.SUBAGENT,
         permission_rules=_GENERAL_RULES,
         disabled_tools=["bash", "write", "edit", "todo_write"],
+    ),
+    "computer": AgentInfo(
+        name="computer",
+        description=(
+            "Computer-use agent: sees the screen and controls mouse/keyboard. "
+            "Requires the computer-use extras (mss, pillow, pyautogui)."
+        ),
+        system_prompt=_COMPUTER_SYSTEM_PROMPT,
+        mode=AgentMode.PRIMARY,
+        permission_rules=_COMPUTER_RULES,
     ),
 }
 

@@ -157,7 +157,7 @@ def _config(ctx: CommandContext):
 # ---------------------------------------------------------------------------
 
 
-@command("help", "Show available commands")
+@command("help", "Show available commands and skills")
 def cmd_help(ctx: CommandContext) -> CommandResult:
     lines = ["[bold]Available commands:[/bold]\n"]
     for name in sorted(_COMMANDS):
@@ -166,9 +166,63 @@ def cmd_help(ctx: CommandContext) -> CommandResult:
             f"  [bold cyan]/{name}[/bold cyan]  [dim]{entry.description}[/dim]"
         )
         for sub_name, (_, sub_desc) in sorted(entry.subcommands.items()):
+            lines.append(f"    [bold cyan]/{name} {sub_name}[/bold cyan]  [dim]{sub_desc}[/dim]")
+
+    # Append skills section
+    try:
+        from rich.markup import escape
+
+        from openvibe.skill.registry import get_registry
+        skills = get_registry().user_invocable()
+        if skills:
+            lines.append("\n[bold]Skills[/bold] [dim](route through the LLM):[/dim]\n")
+            for skill in skills:
+                aliases = (
+                    f"  [dim]alias: {', '.join(f'/{a}' for a in skill.aliases)}[/dim]"
+                    if skill.aliases
+                    else ""
+                )
+                hint = f" [dim]{escape(skill.argument_hint)}[/dim]" if skill.argument_hint else ""
+                lines.append(
+                    f"  [bold cyan]/{escape(skill.name)}[/bold cyan]{hint}"
+                    f"  [dim]{escape(skill.description)}[/dim]{aliases}"
+                )
+    except Exception:
+        pass
+
+    return CommandResult(output="\n".join(lines))
+
+
+@command("skills", "List available skills")
+def cmd_skills(ctx: CommandContext) -> CommandResult:
+    """Show all user-invocable skills with metadata."""
+    try:
+        from openvibe.skill.registry import get_registry
+    except ImportError:
+        return CommandResult(output="[dim]Skills system not available.[/dim]")
+
+    skills = get_registry().user_invocable()
+    if not skills:
+        return CommandResult(output="[dim]No skills registered.[/dim]")
+
+    from rich.markup import escape
+
+    lines = ["[bold]Available skills:[/bold]\n"]
+    for skill in skills:
+        lines.append(f"[bold cyan]/{escape(skill.name)}[/bold cyan]")
+        if skill.aliases:
+            lines[-1] += f"  [dim](aliases: {', '.join(f'/{a}' for a in skill.aliases)})[/dim]"
+        lines.append(f"  [dim]{escape(skill.description)}[/dim]")
+        if skill.when_to_use:
+            lines.append(f"  [yellow]When to use:[/yellow] [dim]{escape(skill.when_to_use)}[/dim]")
+        if skill.argument_hint:
             lines.append(
-                f"    [bold cyan]/{name} {sub_name}[/bold cyan]  [dim]{sub_desc}[/dim]"
+                f"  [yellow]Usage:[/yellow] [dim]/{escape(skill.name)} {escape(skill.argument_hint)}[/dim]"
             )
+        if skill.tags:
+            lines.append(f"  [yellow]Tags:[/yellow] [dim]{escape(', '.join(skill.tags))}[/dim]")
+        lines.append("")
+
     return CommandResult(output="\n".join(lines))
 
 
@@ -367,6 +421,83 @@ def cmd_model(ctx: CommandContext) -> CommandResult:
     return CommandResult(
         output=f"[green]Model switched to:[/green] {provider_id}/{model_id}\n"
         f"[dim]Saved to session.[/dim]"
+    )
+
+
+@command("screenshot", "Take a screenshot and display info about the current screen")
+def cmd_screenshot(ctx: CommandContext) -> CommandResult:
+    """Capture the screen and show dimensions (does not embed the image in TUI)."""
+    try:
+        from openvibe.computer.capture import capture_screen, screen_size
+    except ImportError:
+        return CommandResult(
+            output="[red]Computer-use extras not installed.[/red]\n"
+            "[dim]Run: pip install mss pillow[/dim]"
+        )
+
+    try:
+        w, h = screen_size()
+        lines = [
+            "[bold]Screen info[/bold]\n",
+            f"  [dim]Primary monitor:[/dim] [bold]{w}×{h}[/bold] pixels",
+            "\n[dim]Use the 'screenshot' tool inside a computer-use session to "
+            "capture the screen and pass the image to the model.[/dim]",
+        ]
+        return CommandResult(output="\n".join(lines))
+    except Exception as exc:
+        return CommandResult(output=f"[red]Screenshot failed:[/red] {exc}", )
+
+
+@command("computer", "Show computer-use session info or manage the sandbox")
+def cmd_computer(ctx: CommandContext) -> CommandResult:
+    """Display audit log summary for the current session's computer-use sandbox."""
+    try:
+        from openvibe.computer.sandbox import get_sandbox
+    except ImportError:
+        return CommandResult(
+            output="[red]Computer-use module not available.[/red]"
+        )
+
+    sandbox = get_sandbox(ctx.session.info.id)
+    lines = [
+        "[bold]Computer-use sandbox[/bold]\n",
+        f"  [dim]Session:[/dim]      {sandbox.session_id[:16]}…",
+        f"  [dim]Actions logged:[/dim] {len(sandbox.audit_log)}",
+    ]
+    if sandbox.allowed_apps:
+        lines.append(f"  [dim]Allowed apps:[/dim]  {', '.join(sandbox.allowed_apps)}")
+    else:
+        lines.append("  [dim]Allowed apps:[/dim]  (all)")
+    if sandbox.screen_region:
+        x, y, w, h = sandbox.screen_region
+        lines.append(f"  [dim]Screen region:[/dim] x={x} y={y} w={w} h={h}")
+    else:
+        lines.append("  [dim]Screen region:[/dim] (full screen)")
+
+    if sandbox.audit_log:
+        lines.append("\n[bold dim]Recent actions:[/bold dim]")
+        for entry in sandbox.audit_log[-10:]:
+            ts = entry.timestamp
+            status = "[green]ok[/green]" if entry.error is None else "[red]err[/red]"
+            lines.append(
+                f"  [{ts:.0f}] {status} {entry.action_type.value}  "
+                f"[dim]{(entry.result or entry.error or '')[:60]}[/dim]"
+            )
+
+    return CommandResult(output="\n".join(lines))
+
+
+@subcommand("computer", "reset", "Clear the computer-use audit log for this session")
+def cmd_computer_reset(ctx: CommandContext) -> CommandResult:
+    try:
+        from openvibe.computer.sandbox import clear_sandbox, get_sandbox
+    except ImportError:
+        return CommandResult(output="[red]Computer-use module not available.[/red]")
+
+    count = len(get_sandbox(ctx.session.info.id).audit_log)
+    clear_sandbox(ctx.session.info.id)
+    return CommandResult(
+        output=f"[green]Cleared {count} computer-use audit entries.[/green]"
     )
 
 
