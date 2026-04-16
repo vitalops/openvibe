@@ -424,6 +424,83 @@ def cmd_model(ctx: CommandContext) -> CommandResult:
     )
 
 
+@command("screenshot", "Take a screenshot and display info about the current screen")
+def cmd_screenshot(ctx: CommandContext) -> CommandResult:
+    """Capture the screen and show dimensions (does not embed the image in TUI)."""
+    try:
+        from openvibe.computer.capture import capture_screen, screen_size
+    except ImportError:
+        return CommandResult(
+            output="[red]Computer-use extras not installed.[/red]\n"
+            "[dim]Run: pip install mss pillow[/dim]"
+        )
+
+    try:
+        w, h = screen_size()
+        lines = [
+            "[bold]Screen info[/bold]\n",
+            f"  [dim]Primary monitor:[/dim] [bold]{w}×{h}[/bold] pixels",
+            "\n[dim]Use the 'screenshot' tool inside a computer-use session to "
+            "capture the screen and pass the image to the model.[/dim]",
+        ]
+        return CommandResult(output="\n".join(lines))
+    except Exception as exc:
+        return CommandResult(output=f"[red]Screenshot failed:[/red] {exc}", )
+
+
+@command("computer", "Show computer-use session info or manage the sandbox")
+def cmd_computer(ctx: CommandContext) -> CommandResult:
+    """Display audit log summary for the current session's computer-use sandbox."""
+    try:
+        from openvibe.computer.sandbox import get_sandbox
+    except ImportError:
+        return CommandResult(
+            output="[red]Computer-use module not available.[/red]"
+        )
+
+    sandbox = get_sandbox(ctx.session.info.id)
+    lines = [
+        "[bold]Computer-use sandbox[/bold]\n",
+        f"  [dim]Session:[/dim]      {sandbox.session_id[:16]}…",
+        f"  [dim]Actions logged:[/dim] {len(sandbox.audit_log)}",
+    ]
+    if sandbox.allowed_apps:
+        lines.append(f"  [dim]Allowed apps:[/dim]  {', '.join(sandbox.allowed_apps)}")
+    else:
+        lines.append("  [dim]Allowed apps:[/dim]  (all)")
+    if sandbox.screen_region:
+        x, y, w, h = sandbox.screen_region
+        lines.append(f"  [dim]Screen region:[/dim] x={x} y={y} w={w} h={h}")
+    else:
+        lines.append("  [dim]Screen region:[/dim] (full screen)")
+
+    if sandbox.audit_log:
+        lines.append("\n[bold dim]Recent actions:[/bold dim]")
+        for entry in sandbox.audit_log[-10:]:
+            ts = entry.timestamp
+            status = "[green]ok[/green]" if entry.error is None else "[red]err[/red]"
+            lines.append(
+                f"  [{ts:.0f}] {status} {entry.action_type.value}  "
+                f"[dim]{(entry.result or entry.error or '')[:60]}[/dim]"
+            )
+
+    return CommandResult(output="\n".join(lines))
+
+
+@subcommand("computer", "reset", "Clear the computer-use audit log for this session")
+def cmd_computer_reset(ctx: CommandContext) -> CommandResult:
+    try:
+        from openvibe.computer.sandbox import clear_sandbox, get_sandbox
+    except ImportError:
+        return CommandResult(output="[red]Computer-use module not available.[/red]")
+
+    count = len(get_sandbox(ctx.session.info.id).audit_log)
+    clear_sandbox(ctx.session.info.id)
+    return CommandResult(
+        output=f"[green]Cleared {count} computer-use audit entries.[/green]"
+    )
+
+
 @command("quit", "Exit the application")
 def cmd_quit(ctx: CommandContext) -> CommandResult:
     return CommandResult(output="", quit=True)
