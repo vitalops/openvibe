@@ -1,19 +1,22 @@
 # openvibe Examples
 
+openvibe takes a task and executes it end-to-end using whatever tools the task
+requires. Once done, it evaluates its own output by designing a simulation
+environment, generating scenario datasets, running them, and producing a scored
+report. It then offers to improve based on what the evaluation found.
+
 ---
 
 ## [`github_dashboard/`](./github_dashboard/)
 
-openvibe builds a live analytics dashboard for the `pallets/flask` GitHub
-repository — fetching real data, storing it in SQLite, and serving it through
-a Flask API with an HTML UI.
-
-The evaluation starts the live server, calls every endpoint, runs SQL queries
-directly against the database, and compares the results. SimHarness scenarios
-are grounded in the actual numbers, not simulated ones.
+openvibe builds a GitHub analytics dashboard for `pallets/flask` from a plain
+task description — fetching real data, storing it in SQLite, and serving it
+through a Flask API with an HTML UI. It then evaluates what it built by designing
+a simulation environment, generating test scenarios, and scoring the outcome.
+After evaluation it offers to improve the implementation based on the results.
 
 ```
-/build-eval examples/github_dashboard/TASK.md
+build and evaluate examples/github_dashboard/TASK.md
 ```
 
 ---
