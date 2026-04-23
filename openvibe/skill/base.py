@@ -155,6 +155,42 @@ class SkillDefinition(abc.ABC):
         """Return the LLM prompt for this invocation."""
         ...
 
+    def match_intent(self, text: str) -> float:
+        """Return a confidence score [0.0–1.0] that *text* intends to invoke this skill.
+
+        Called by the auto-router when the user does not use an explicit ``/name``
+        prefix.  Default implementation does keyword matching against tags,
+        capabilities, aliases, and ``when_to_use``.  Override for smarter detection.
+        """
+        lower = text.lower()
+        score = 0.0
+
+        for alias in self.aliases:
+            if alias.lower() in lower:
+                score += 0.4
+
+        for tag in self.tags:
+            if tag.lower() in lower:
+                score += 0.15
+
+        for cap in self.capabilities:
+            if cap.replace("-", " ").lower() in lower:
+                score += 0.1
+
+        # Penalise very short inputs to avoid false positives
+        if len(text.split()) < 3:
+            score *= 0.5
+
+        return min(score, 1.0)
+
+    def extract_args(self, text: str) -> str:
+        """Extract skill arguments from a natural-language *text*.
+
+        Default: return empty string (skill will use its built-in default).
+        Override to pull file paths, identifiers, etc. from the user's message.
+        """
+        return ""
+
     def get_retry_prompt(self, args: str, attempt: int, hint: str) -> str:
         """Return a modified prompt for retry attempt *attempt* (1-indexed).
 

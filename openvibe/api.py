@@ -310,6 +310,36 @@ class Session:
             return None
         return skill.get_prompt(args)
 
+    def _try_auto_route(self, text: str) -> str | None:
+        """Match user intent against registered skills without an explicit ``/`` prefix.
+
+        Scores every user-invocable skill and invokes the best match when its
+        confidence exceeds the threshold (0.4).  Returns ``None`` when no skill
+        is confident enough, letting the message fall through to the plain LLM.
+        """
+        from openvibe.skill.registry import get_registry
+
+        if text.startswith("/"):
+            return None  # already handled by _try_skill
+
+        registry = get_registry()
+        best_skill = None
+        best_score = 0.0
+
+        for skill in registry.all():
+            if not skill.user_invocable:
+                continue
+            score = skill.match_intent(text)
+            if score > best_score:
+                best_score = score
+                best_skill = skill
+
+        if best_skill is None or best_score < 0.4:
+            return None
+
+        args = best_skill.extract_args(text)
+        return best_skill.get_prompt(args)
+
     def _send_raw(
         self,
         text: str,
@@ -351,10 +381,15 @@ class Session:
         if cmd_response is not None:
             return cmd_response
 
-        # 2. Skill invocations: expand prompt before sending to LLM.
+        # 2. Explicit skill invocations (``/name args``): expand prompt.
         expanded = self._try_skill(text)
         if expanded is not None:
             text = expanded
+        else:
+            # 3. Intent-based auto-routing: match natural language to skills.
+            auto = self._try_auto_route(text)
+            if auto is not None:
+                text = auto
 
         with self._lock:
             if self._state not in (SessionState.IDLE, SessionState.ERROR):
@@ -415,10 +450,15 @@ class Session:
                 callback(cmd_response)
             return
 
-        # Skill invocations: expand prompt before sending to LLM.
+        # Explicit skill invocations (``/name args``): expand prompt.
         expanded = self._try_skill(text)
         if expanded is not None:
             text = expanded
+        else:
+            # Intent-based auto-routing.
+            auto = self._try_auto_route(text)
+            if auto is not None:
+                text = auto
 
         with self._lock:
             if self._state not in (SessionState.IDLE, SessionState.ERROR):

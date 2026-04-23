@@ -357,6 +357,5 @@ def count_tokens(model: str, text: str) -> int:
 
 def model_context_limits(model: str) -> tuple[int, int]:
     """Return (max_input_tokens, max_output_tokens) for *model*."""
-
     info = litellm.get_model_info(model)
     return int(info["max_input_tokens"]), int(info["max_output_tokens"])

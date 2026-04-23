@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
+import subprocess
+import sys
 from typing import Any
 
 from textual import events as textual_events
@@ -10,6 +13,25 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.screen import Screen
 from textual.widgets import Static
+
+
+def _copy_to_clipboard(text: str) -> bool:
+    """Copy *text* to the system clipboard.  Returns True on success."""
+    with contextlib.suppress(Exception):
+        if sys.platform == "darwin":
+            subprocess.run(["pbcopy"], input=text.encode(), check=True, timeout=2)
+            return True
+        for cmd in (
+            ["xclip", "-selection", "clipboard"],
+            ["xsel", "--clipboard", "--input"],
+            ["wl-copy"],
+        ):
+            try:
+                subprocess.run(cmd, input=text.encode(), check=True, timeout=2)
+                return True
+            except (FileNotFoundError, subprocess.SubprocessError):
+                continue
+    return False
 
 from openvibe.api import SessionState
 from openvibe.session.models import TextPart, ToolPart
@@ -36,6 +58,7 @@ class SessionScreen(Screen):
     BINDINGS = [
         Binding("ctrl+s", "sessions", "Sessions", show=True),
         Binding("ctrl+n", "new_session", "New", show=True),
+        Binding("ctrl+y", "copy_last", "Copy", show=True),
         Binding("escape", "cancel_turn", "Cancel", show=False),
     ]
 
@@ -619,3 +642,20 @@ class SessionScreen(Screen):
         session.abort()
         self.query_one(InputBar).enable()
         self._refresh_header()
+
+    def action_copy_last(self) -> None:
+        """Copy the last assistant message to the system clipboard (Ctrl+Y)."""
+        text = self.query_one(MessageList).get_last_assistant_text()
+        if not text:
+            return
+        input_bar = self.query_one(InputBar)
+        if _copy_to_clipboard(text):
+            input_bar.set_status("[green]Copied to clipboard.[/green]")
+        else:
+            input_bar.set_status("[dim]Clipboard unavailable (install xclip/xsel on Linux).[/dim]")
+        self.set_timer(2.5, self._restore_hint)
+
+    def _restore_hint(self) -> None:
+        input_bar = self.query_one(InputBar)
+        if not input_bar.in_permission_mode:
+            input_bar.set_status(input_bar._hint_text())

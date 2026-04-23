@@ -144,4 +144,26 @@ def _needs_setup(project_dir: Path) -> bool:
 
 def run_tui(project_dir: Path | None = None) -> None:
     """Entry point: launch the TUI with an embedded in-process backend."""
-    OpenvibeApp(project_dir=project_dir or Path.cwd()).run()
+    import contextlib
+    import subprocess
+    import sys
+
+    # On macOS (and some Linux terminals) XON/XOFF flow control is enabled by
+    # default, causing the terminal driver to intercept Ctrl+Q (XON) before
+    # Textual ever sees it.  Save the current stty settings, disable ixon, and
+    # restore on exit so the user's session is left as they found it.
+    _saved_stty: str | None = None
+    if sys.platform != "win32":
+        with contextlib.suppress(Exception):
+            r = subprocess.run(
+                ["stty", "-g"], capture_output=True, text=True, check=True
+            )
+            _saved_stty = r.stdout.strip()
+            subprocess.run(["stty", "-ixon"], capture_output=True, check=False)
+
+    try:
+        OpenvibeApp(project_dir=project_dir or Path.cwd()).run()
+    finally:
+        if _saved_stty:
+            with contextlib.suppress(Exception):
+                subprocess.run(["stty", _saved_stty], capture_output=True, check=False)

@@ -295,3 +295,10 @@ class MessageList(VerticalScroll):
         if widget := self._messages.get(message_id):
             widget.append_text(content)
             self.scroll_end(animate=False)
+
+    def get_last_assistant_text(self) -> str:
+        """Return the raw text of the most recent assistant message, or ''."""
+        for widget in reversed(list(self._messages.values())):
+            if widget._role == "assistant" and widget._text:
+                return widget._text
+        return ""
