@@ -1,12 +1,10 @@
 # GitHub Analytics Dashboard
 
-openvibe takes a task and executes it end-to-end. Once done, it evaluates its
-own output through a simulation harness it designs itself, and offers to improve
-based on what the evaluation found.
-
-This example runs that full cycle on a concrete task: build a live analytics
-dashboard that pulls real data from the `pallets/flask` GitHub repository and
-serves it over a web API.
+This is a software engineering task solved using openvibe. The task is to build
+a live analytics dashboard that pulls real data from the `pallets/flask` GitHub
+repository and serves it over a web API. openvibe executes the task end-to-end,
+evaluates what it built through a simulation harness it designs itself, and
+offers to improve the implementation based on what the evaluation found.
 
 ---
 
@@ -93,13 +91,6 @@ python examples/github_dashboard/run.py --phase evaluate
 
 # Use a different model
 python examples/github_dashboard/run.py --model openai/gpt-4o
-```
-
-Set `GITHUB_TOKEN` to avoid GitHub's unauthenticated rate limit (60 req/hr):
-
-```bash
-export GITHUB_TOKEN=ghp_...
-python examples/github_dashboard/run.py
 ```
 
 ---
