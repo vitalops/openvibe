@@ -48,6 +48,11 @@ class ToolSpec(BaseModel):
     # Real callable — excluded from serialization so datasets remain portable JSON.
     # When set, WorldSimulator invokes this instead of generating a synthetic result.
     callable: Optional[Callable[..., Any]] = Field(default=None, exclude=True)
+    # Shell command template for executing the real artifact.
+    # Use {param_name} for tool parameters and {cwd} for the working directory.
+    # Example: "python {cwd}/cli.py ingest {source}"
+    # Takes priority over callable when both are set.
+    shell_command: Optional[str] = Field(default=None)
 
 
 class EvaluationCriterion(BaseModel):

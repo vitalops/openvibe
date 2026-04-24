@@ -128,6 +128,7 @@ async def _run_evaluate_phase(
         output_dir=str(_OUTPUT_DIR),
         dataset_name="github_dashboard",
         tags=["github", "dashboard"],
+        working_dir=str(_EXAMPLE_DIR),
     )
     harness = SimHarness(config=config, llm=LiteLLMBackend(), on_progress=on_progress)
     report  = await harness.run()

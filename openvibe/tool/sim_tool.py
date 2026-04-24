@@ -57,6 +57,14 @@ class SimTool(Tool):
             default=None,
             description="Optional directory path to save dataset JSONL and report JSON.",
         )
+        working_dir: Optional[str] = Field(
+            default=None,
+            description=(
+                "Directory containing the built artifact. When provided, the simulation "
+                "executes real shell commands against the artifact instead of synthesising "
+                "results. Set this to the folder where the built output lives."
+            ),
+        )
         mode: str = Field(
             default="full",
             description=(
@@ -97,6 +105,7 @@ class SimTool(Tool):
             n_generate=params.n_scenarios,
             output_dir=params.output_path,
             agent_name=ctx.agent_name,
+            working_dir=params.working_dir,
         )
         harness = SimHarness(config=config, llm=llm, on_progress=on_progress)
 

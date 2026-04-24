@@ -88,6 +88,13 @@ class HarnessConfig:
     dataset_name: Optional[str] = None
     tags: list[str] = field(default_factory=list)
 
+    working_dir: Optional[str] = None
+    """Working directory for executing shell commands during simulation.
+    When set, tool shell_command templates are executed here — meaning the
+    simulation actually runs the built artifact rather than synthesising results.
+    Set this to the directory containing the built output (e.g. the example folder).
+    """
+
 
 class SimHarness:
     """End-to-end simulation harness.
@@ -133,7 +140,7 @@ class SimHarness:
 
         # Build components — all share the same LLMBackend
         self._designer = SimDesigner(self._llm, model)
-        self._world = WorldSimulator(self._llm, model, max_steps=config.max_steps)
+        self._world = WorldSimulator(self._llm, model, max_steps=config.max_steps, working_dir=config.working_dir)
         self._evaluator = Evaluator(
             self._llm,
             model,

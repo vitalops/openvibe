@@ -100,7 +100,8 @@ Return a single JSON object with exactly these fields:
           "param_name": {{"type": "string", "description": "..."}}
         }},
         "required": ["param_name"]
-      }}
+      }},
+      "command": "shell command to actually invoke this tool, e.g. 'python {{cwd}}/cli.py ingest {{source}}' — use {{cwd}} for working directory and {{param_name}} for each parameter. Set to null if the tool cannot be executed as a shell command."
     }}
   ],
   "evaluation_criteria": [
@@ -124,6 +125,7 @@ Return a single JSON object with exactly these fields:
 Requirements:
 - Personas must be realistic users or stakeholders of what was produced
 - Tools must reflect the actual capabilities of what was produced
+- For every tool, provide a "command" shell template if the produced output is executable (CLI, server, script). Use {{cwd}} and {{param_name}} placeholders. This is how the simulation will actually run the artifact.
 - Evaluation criteria must directly test whether the task requirements were met
 - Criteria weights must sum to exactly 1.0
 - Constraints must be derived from the original task requirements
@@ -314,6 +316,7 @@ class SimDesigner:
                 name=t["name"],
                 description=t.get("description", ""),
                 parameters=t.get("parameters", {"type": "object", "properties": {}}),
+                shell_command=t.get("command") or None,
             )
             for t in data.get("tools", [])
         ]

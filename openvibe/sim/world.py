@@ -45,10 +45,12 @@ class WorldSimulator:
         llm: LLMBackend,
         model: str,
         max_steps: int = _MAX_STEPS_DEFAULT,
+        working_dir: str | None = None,
     ) -> None:
         self._llm = llm
         self._model = model
         self._max_steps = max_steps
+        self._working_dir = working_dir
 
     async def simulate(
         self,
@@ -149,7 +151,7 @@ class WorldSimulator:
 
         # If the agent issued tool calls, invoke real callables or synthesise results
         if "TOOL_CALL:" in raw:
-            raw = await _process_tool_calls(raw, tool_map)
+            raw = await _process_tool_calls(raw, tool_map, self._working_dir)
 
         return raw.strip()
 
@@ -251,8 +253,12 @@ def _format_tool_list(tools: list[ToolSpec]) -> str:
     return "\n".join(lines)
 
 
-async def _process_tool_calls(raw: str, tool_map: dict[str, ToolSpec]) -> str:
-    """Parse TOOL_CALL lines, invoke real callables or synthesise results."""
+async def _process_tool_calls(
+    raw: str,
+    tool_map: dict[str, ToolSpec],
+    working_dir: str | None = None,
+) -> str:
+    """Parse TOOL_CALL lines, invoke real callables/commands or synthesise results."""
     lines = raw.split("\n")
     result_lines: list[str] = []
     tool_results: list[str] = []
@@ -261,7 +267,7 @@ async def _process_tool_calls(raw: str, tool_map: dict[str, ToolSpec]) -> str:
         stripped = line.strip()
         if stripped.startswith("TOOL_CALL:"):
             call_text = stripped[len("TOOL_CALL:"):].strip()
-            result = await _invoke_tool(call_text, tool_map)
+            result = await _invoke_tool(call_text, tool_map, working_dir)
             tool_results.append(f"→ {call_text[:50]}: {result}")
             result_lines.append(f"[Tool called: {call_text.split('(')[0]}]")
         else:
@@ -273,8 +279,12 @@ async def _process_tool_calls(raw: str, tool_map: dict[str, ToolSpec]) -> str:
     return "\n".join(result_lines)
 
 
-async def _invoke_tool(call_text: str, tool_map: dict[str, ToolSpec]) -> str:
-    """Invoke a real callable if present, otherwise return a synthetic result."""
+async def _invoke_tool(
+    call_text: str,
+    tool_map: dict[str, ToolSpec],
+    working_dir: str | None = None,
+) -> str:
+    """Invoke a shell command, callable, or synthesise a result — in that priority order."""
     try:
         paren = call_text.index("(")
         tool_name = call_text[:paren].strip()
@@ -288,6 +298,11 @@ async def _invoke_tool(call_text: str, tool_map: dict[str, ToolSpec]) -> str:
     if not spec:
         return f"Error: tool '{tool_name}' not found in environment."
 
+    # Priority 1: shell command — actually execute the built artifact
+    if spec.shell_command:
+        return await _run_shell_command(spec.shell_command, args, working_dir)
+
+    # Priority 2: Python callable
     if spec.callable is not None:
         try:
             result = spec.callable(**args)
@@ -297,5 +312,50 @@ async def _invoke_tool(call_text: str, tool_map: dict[str, ToolSpec]) -> str:
         except Exception as exc:
             return f"Error calling {tool_name}: {exc}"
 
+    # Priority 3: synthetic result
     arg_summary = ", ".join(f"{k}={repr(v)}" for k, v in list(args.items())[:3])
     return f"Success ({arg_summary}). {spec.description.rstrip('.')} completed."
+
+
+async def _run_shell_command(
+    template: str,
+    args: dict[str, Any],
+    working_dir: str | None,
+) -> str:
+    """Render a shell_command template with args and execute it, returning stdout+stderr."""
+    import shlex
+    import subprocess
+
+    # Substitute {param_name} and {cwd} placeholders
+    cmd = template
+    if working_dir:
+        cmd = cmd.replace("{cwd}", working_dir)
+    for key, val in args.items():
+        cmd = cmd.replace(f"{{{key}}}", shlex.quote(str(val)))
+
+    # Remove any leftover unresolved placeholders (optional params not supplied)
+    import re
+    cmd = re.sub(r"\{[^}]+\}", "", cmd).strip()
+
+    logger.debug("Executing tool command: %s", cmd)
+    try:
+        loop = asyncio.get_event_loop()
+        proc = await loop.run_in_executor(
+            None,
+            lambda: subprocess.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                cwd=working_dir,
+            ),
+        )
+        output = (proc.stdout + proc.stderr).strip()
+        if proc.returncode != 0:
+            return f"[exit {proc.returncode}] {output or '(no output)'}"
+        return output or "(completed with no output)"
+    except subprocess.TimeoutExpired:
+        return "Error: command timed out after 60 seconds."
+    except Exception as exc:
+        return f"Error executing command: {exc}"

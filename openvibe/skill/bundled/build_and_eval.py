@@ -103,11 +103,12 @@ Do **not** proceed to Phase 2 until Phase 1 is fully complete and verified.
    - `n_scenarios` = 5
    - `mode` = "full"
    - `output_path` = "{output_path}"
+   - `working_dir` = "{task_dir}"
 
    The simulation harness will automatically:
    - Design a complete evaluation environment (personas, tools, criteria) suited to what was built
-   - Generate a scenario dataset
-   - Run each scenario and score the outcome
+   - Generate shell commands to execute the real artifact during simulation
+   - Run each scenario by actually invoking the built artifact and scoring the real outputs
    - Save a full report to `{output_path}/`
 
 7. Present the evaluation summary:
