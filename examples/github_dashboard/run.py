@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import sys
 from pathlib import Path
 
@@ -37,6 +36,7 @@ _SERVER_SCRIPT = _EXAMPLE_DIR / "app" / "server.py"
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="GitHub dashboard build and evaluate")
     p.add_argument("--phase", choices=["full", "build", "evaluate"], default="full")
+    p.add_argument("--task", default=None, help="Path to task file (default: examples/github_dashboard/TASK.md)")
     p.add_argument("--n", type=int, default=5)
     p.add_argument("--model", default="")
     p.add_argument("--max-steps", type=int, default=15)
@@ -47,20 +47,6 @@ def parse_args() -> argparse.Namespace:
 
 def _run_build_phase() -> str:
     from openvibe import OpenVibe, SessionState
-
-    task_text = _TASK_FILE.read_text(encoding="utf-8")
-
-    prompt = f"""Complete the following task using your tools.
-
-{task_text}
-
-Work from the repository root. All created files should live under
-`examples/github_dashboard/`. After building:
-1. Run `python examples/github_dashboard/app/fetch.py` to populate the database.
-2. Start the server briefly and verify each endpoint responds.
-3. Write `examples/github_dashboard/SOLUTION.md` describing what you built,
-   the key files created, how to run it, and any limitations.
-"""
 
     print("\n── Phase 1: Build ─────────────────────────────────────────────────")
 
@@ -74,6 +60,13 @@ Work from the repository root. All created files should live under
         icons = {"running": "◎", "completed": "●", "error": "✗"}
         if icons.get(status):
             print(f"\n  {icons[status]} {name}  {arg}", flush=True)
+
+    prompt = (
+        f"Read `{_TASK_FILE}` to understand what needs to be built. "
+        f"Implement it fully using your tools — create all required files and execute any needed commands. "
+        f"Verify the implementation is functional, then save the results to `{_SOLUTION_FILE}` "
+        f"(key files created, how to run it, any known limitations)."
+    )
 
     with OpenVibe() as ov:
         session = ov.create_session()
@@ -206,7 +199,7 @@ to describe what changed and why.
         if icons.get(status):
             print(f"\n  {icons[status]} {name}  {arg}", flush=True)
 
-    with OpenVibe() as ov:
+    with OpenVibe(project_dir=_repo_root) as ov:
         session = ov.create_session()
         response = session.send(
             prompt,
@@ -298,8 +291,14 @@ def _build_markdown_report(report) -> str:
 
 # ── Entrypoint ────────────────────────────────────────────────────────────────
 
-async def main() -> None:
+def main() -> None:
     args = parse_args()
+
+    global _TASK_FILE, _SOLUTION_FILE, _OUTPUT_DIR
+    if args.task:
+        _TASK_FILE = Path(args.task).resolve()
+        _SOLUTION_FILE = _TASK_FILE.parent / "SOLUTION.md"
+        _OUTPUT_DIR = _TASK_FILE.parent / "eval_output"
 
     from openvibe.config import load_config
     load_config()
@@ -308,24 +307,25 @@ async def main() -> None:
     model = args.model or resolve_model()
 
     print(f"\nGitHub Analytics Dashboard — build and evaluate")
+    print(f"Task  : {_TASK_FILE}")
     print(f"Model : {model}  |  Phase : {args.phase}")
 
     solution_text = ""
     report = None
 
     if args.phase in ("full", "build"):
-        solution_text = await asyncio.to_thread(_run_build_phase)
+        solution_text = _run_build_phase()
 
     if args.phase in ("full", "evaluate"):
         if not solution_text and _SOLUTION_FILE.exists():
             solution_text = _SOLUTION_FILE.read_text(encoding="utf-8")
 
-        report = await _run_evaluate_phase(
+        report = asyncio.run(_run_evaluate_phase(
             solution_text=solution_text,
             model=model,
             n=args.n,
             max_steps=args.max_steps,
-        )
+        ))
 
     if report is not None:
         try:
@@ -334,14 +334,14 @@ async def main() -> None:
             answer = ""
 
         if answer in ("y", "yes"):
-            solution_text = await asyncio.to_thread(_run_improvement_phase, report)
+            solution_text = _run_improvement_phase(report)
             print("\n  Re-evaluating after improvements…")
-            await _run_evaluate_phase(
+            asyncio.run(_run_evaluate_phase(
                 solution_text=solution_text,
                 model=model,
                 n=args.n,
                 max_steps=args.max_steps,
-            )
+            ))
 
 
 # ── Console summary ───────────────────────────────────────────────────────────
@@ -383,4 +383,4 @@ def _print_report(report) -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
