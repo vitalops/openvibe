@@ -1,0 +1,3 @@
+# Second Brain
+
+Build a local second brain that ingests Markdown files, PDFs, plain text, URLs (saved as bookmarks), and GitHub repositories. Chunk and embed content using a local `sentence-transformers` model (no API calls). Store vectors in ChromaDB. Expose a CLI with two commands: `ingest <source>` to add a source, and `ask <question>` to query across everything ingested and get an answer with source citations. Use Ollama (llama3) as the local LLM for answering and summarising. Nothing should call an external API or require an API key. For this task, use smallest models possible and avoid heavy compute.
