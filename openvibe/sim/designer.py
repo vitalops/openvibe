@@ -55,25 +55,36 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _DESIGN_SYSTEM = (
-    "You are an expert enterprise workflow architect. "
-    "You design simulation environments for evaluating AI agents in enterprise settings. "
+    "You are an expert simulation environment designer. "
+    "You design environments that test AI agent outputs by simulating realistic usage. "
     "Always reply with valid JSON only — no markdown fences, no prose, no explanations."
 )
 
 _DESIGN_PROMPT = """\
-Design a simulation environment for evaluating an AI agent in the following context:
+You are given context describing a task and what was produced to fulfil it.
+Your job is to design a simulation environment that tests the quality of what was produced
+by simulating how real users or systems would interact with it.
 
-CONTEXT:
+CONTEXT (task description + what was produced):
 {context}
+
+First, analyse the context:
+- What did the task ask for?
+- What was actually produced and how does it work?
+- Who would realistically use or interact with it?
+- What could go wrong or be done poorly?
+
+Then design an environment whose scenarios will expose whether what was produced
+works correctly, handles edge cases, and meets the original task requirements.
 
 Return a single JSON object with exactly these fields:
 {{
   "name": "Short environment name",
-  "description": "1-2 sentence description of the workflow",
+  "description": "1-2 sentence description of what is being tested",
   "personas": [
     {{
       "role": "role_name",
-      "background": "Who this person is and their situation",
+      "background": "Who this person is and why they are using what was produced",
       "personality_traits": ["trait1", "trait2"],
       "goals": ["goal1", "goal2"],
       "default_frustration": 0.0-1.0
@@ -82,7 +93,7 @@ Return a single JSON object with exactly these fields:
   "tools": [
     {{
       "name": "snake_case_tool_name",
-      "description": "What the tool does",
+      "description": "What the tool does — mirror the actual capabilities of what was produced",
       "parameters": {{
         "type": "object",
         "properties": {{
@@ -95,7 +106,7 @@ Return a single JSON object with exactly these fields:
   "evaluation_criteria": [
     {{
       "name": "criterion_name",
-      "description": "What is being measured",
+      "description": "What aspect of the output is being measured",
       "weight": 0.0-1.0,
       "rubric": {{
         "0.0-0.4": "Poor: ...",
@@ -104,23 +115,24 @@ Return a single JSON object with exactly these fields:
       }}
     }}
   ],
-  "constraints": ["Business rule 1", "Business rule 2"],
+  "constraints": ["Constraint derived from task requirements", "..."],
   "workflow_rules": ["Rule 1", "Rule 2"],
-  "agent_system_prompt": "Full system prompt for the agent under test",
-  "domain_hint": "Short free-text domain label"
+  "agent_system_prompt": "Full system prompt briefing the agent on what was produced and how to use it",
+  "domain_hint": "Short free-text label for what is being tested"
 }}
 
 Requirements:
-- Include 2-5 personas covering all roles in this workflow
-- Include 4-8 realistic tools the agent can use
-- Evaluation criteria weights must sum to exactly 1.0
-- Include at least 4 business constraints
-- The agent_system_prompt should fully brief the agent for this workflow
-- Make everything specific to the context, not generic
+- Personas must be realistic users or stakeholders of what was produced
+- Tools must reflect the actual capabilities of what was produced
+- Evaluation criteria must directly test whether the task requirements were met
+- Criteria weights must sum to exactly 1.0
+- Constraints must be derived from the original task requirements
+- The agent_system_prompt must give the agent full context of what was produced and how to operate it
+- Everything must be specific to the context — do not invent unrelated domains
 """
 
 _GENERATE_SYSTEM = (
-    "You are an enterprise workflow scenario designer. "
+    "You are a workflow scenario designer. "
     "You create realistic test scenarios for AI agent evaluation. "
     "Always reply with valid JSON only — no markdown fences, no prose."
 )
@@ -193,9 +205,8 @@ class SimDesigner:
         """Design a complete SimEnvironment from any context string."""
         if not context.strip():
             context = (
-                "A generic enterprise workflow where an AI agent handles "
-                "requests from internal employees or external customers, "
-                "following company policies and using available tools."
+                "A generic workflow where an AI agent handles requests "
+                "and uses available tools to complete tasks."
             )
 
         prompt = _DESIGN_PROMPT.format(context=context.strip())

@@ -38,7 +38,7 @@ _MAX_STEPS_DEFAULT = 10
 
 
 class WorldSimulator:
-    """Simulates a multi-turn enterprise conversation using openvibe's LLMBackend."""
+    """Simulates a multi-turn conversation using openvibe's LLMBackend."""
 
     def __init__(
         self,
@@ -179,7 +179,7 @@ class WorldSimulator:
         goals = persona_tmpl.goals if persona_tmpl else []
 
         system = (
-            f"You are {name}, a {primary_role} in an enterprise interaction.\n"
+            f"You are {name}, a {primary_role}.\n"
             f"Background: {background}\n"
             + (f"Your specific issue: {specific_issue}\n" if specific_issue else "")
             + f"Personality: {', '.join(traits)}\n"

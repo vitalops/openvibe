@@ -29,7 +29,7 @@ from openvibe.sim.scenario import (
 logger = logging.getLogger(__name__)
 
 _JUDGE_SYSTEM = (
-    "You are an expert evaluator assessing an AI agent's performance in an enterprise workflow simulation. "
+    "You are an expert evaluator assessing an AI agent's performance in a workflow simulation. "
     "Evaluate objectively based on the transcript and rubric. "
     "Always reply with valid JSON only — no markdown fences, no prose."
 )

@@ -14,8 +14,8 @@ Workflow
 Everything is driven by a free-text ``context`` string supplied by the user
 (or auto-detected from the session). No domain enum, no hardcoded classes.
 
-Enterprise integration
-----------------------
+Integration
+-----------
 - Pass ``llm=LiteLLMBackend()`` for standalone use
 - Pass the session's existing LLM backend to share the provider connection
 - ``on_progress`` callback for streaming progress to TUI/CI pipelines
@@ -62,11 +62,9 @@ class HarnessConfig:
     """
 
     context: str = ""
-    """Free-text description of what to simulate.
-    Examples:
-      'Customer support for a SaaS billing platform'
-      'HR onboarding at a 500-person tech company'
-      '' → LLM infers a sensible enterprise workflow
+    """Free-text context describing what to evaluate.
+    Pass the original task description and a summary of what was produced.
+    The designer uses this to create a simulation environment tailored to the output.
     """
 
     model: str = ""

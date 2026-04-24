@@ -18,29 +18,26 @@ logger = logging.getLogger(__name__)
 
 
 class SimTool(Tool):
-    """Run an enterprise workflow environment simulation.
+    """Run a simulation environment to evaluate an agent's output.
 
-    Designs the simulation environment from a plain-text context, generates
-    scenarios, simulates conversations, and evaluates performance — all
-    without leaving the session.
+    Designs the simulation environment from a plain-text context describing
+    the task and what was built, generates scenarios, simulates conversations,
+    and evaluates performance — all without leaving the session.
     """
 
     name = "simulate"
     description = (
-        "Run an enterprise workflow simulation. Describe the workflow in plain text "
-        "and the harness designs an environment, generates scenarios, simulates "
-        "multi-turn conversations, and evaluates agent performance automatically."
+        "Run a workflow simulation to evaluate what was built. Provide the task description "
+        "and what was built as context; the harness designs an environment, generates scenarios, "
+        "simulates multi-turn conversations, and evaluates agent performance automatically."
     )
 
     class Params(BaseModel):
         context: str = Field(
             default="",
             description=(
-                "Plain-text description of what to simulate. "
-                "Examples: 'Customer support for a SaaS billing platform', "
-                "'HR onboarding at a 500-person tech company', "
-                "'B2B sales pipeline for an enterprise software vendor'. "
-                "Leave empty to let the LLM infer a sensible enterprise workflow."
+                "The original task description and a summary of what was produced. "
+                "The harness uses this to design a simulation environment tailored to the output."
             ),
         )
         n_scenarios: int = Field(
