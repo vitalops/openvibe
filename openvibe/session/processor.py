@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import os
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -449,7 +450,7 @@ class SessionProcessor:
                             message_id=msg.id,
                             agent_name=agent.name,
                             project_id=session.project_id,
-                            working_dir=session.directory,
+                            working_dir=os.getcwd(),
                             abort=abort,
                             call_id=part.state.call_id,
                             _permissions=None,  # user already approved; bypass check
@@ -582,7 +583,7 @@ class SessionProcessor:
             message_id=assistant_msg_id,
             agent_name=agent.name,
             project_id=session.project_id,
-            working_dir=session.directory,
+            working_dir=os.getcwd(),
             abort=abort,
             call_id=call_id,
             _permissions=self._permissions,

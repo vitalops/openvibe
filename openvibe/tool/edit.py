@@ -39,6 +39,16 @@ class EditTool(Tool):
 
     async def execute(self, ctx: ToolContext, params: "EditTool.Params") -> ToolResult:
         path = _resolve(params.path, ctx.working_dir)
+        if path is None:
+            return ToolResult(
+                title=f"Edit {params.path}",
+                output=(
+                    f"'{params.path}' is a bare filename with no directory component. "
+                    "Provide an absolute path to the file you want to edit. "
+                    "Use a screenshot or the current environment to determine the right directory."
+                ),
+                error=True,
+            )
 
         await ctx.check_permission(
             tool="edit",
@@ -97,6 +107,10 @@ class EditTool(Tool):
         )
 
 
-def _resolve(path_str: str, working_dir: str) -> Path:
+def _resolve(path_str: str, working_dir: str) -> Path | None:
     p = Path(path_str)
-    return p if p.is_absolute() else Path(working_dir) / p
+    if p.is_absolute():
+        return p
+    if path_str.startswith(("./", "../")) or p.parent != Path("."):
+        return Path(working_dir) / p
+    return None

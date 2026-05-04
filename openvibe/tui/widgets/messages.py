@@ -48,11 +48,17 @@ _STATUS_STYLE: dict[str, str] = {
 class ToolWidget(Widget):
     """Renders one tool call: status icon + name, expandable output on click."""
 
+    can_focus = True
+
     DEFAULT_CSS = """
     ToolWidget {
         height: auto;
         padding: 0 0 0 2;
         color: $text-muted;
+    }
+    ToolWidget:focus {
+        border-left: solid $accent;
+        padding-left: 1;
     }
     ToolWidget .output {
         height: auto;
@@ -107,9 +113,22 @@ class ToolWidget(Widget):
             self._refresh_output()
 
     def on_click(self) -> None:
+        self.focus()
         if self._state.get("output") or self._state.get("error"):
             self._expanded = not self._expanded
             self._refresh_output()
+
+    def get_copy_text(self) -> str:
+        """Return plain-text content suitable for clipboard copy."""
+        name = self._state.get("tool_name", "unknown")
+        argument = self._extract_argument()
+        output = self._state.get("output") or self._state.get("error") or ""
+        parts = [name]
+        if argument:
+            parts.append(f"Input: {argument}")
+        if output:
+            parts.append(f"Output:\n{output}")
+        return "\n".join(parts)
 
     def _refresh_output(self) -> None:
         out = self.query_one("#output", Static)
@@ -133,11 +152,17 @@ class ToolWidget(Widget):
 class MessageWidget(Widget):
     """Renders one message: streaming text and optional tool parts."""
 
+    can_focus = True
+
     DEFAULT_CSS = """
     MessageWidget {
         height: auto;
         padding: 0 2;
         margin: 0;
+    }
+    MessageWidget:focus {
+        border-left: solid $accent;
+        padding-left: 1;
     }
     MessageWidget Static {
         height: auto;
@@ -217,6 +242,14 @@ class MessageWidget(Widget):
                 self.mount(widget, before=before)
             else:
                 self.mount(widget)
+
+    def on_click(self) -> None:
+        self.focus()
+
+    def get_copy_text(self) -> str:
+        """Return plain-text content suitable for clipboard copy."""
+        from openvibe.tui.clipboard import strip_markup
+        return strip_markup(self._text)
 
     def append_text(self, content: str) -> None:
         if self._role == "assistant":

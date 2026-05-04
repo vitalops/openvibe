@@ -694,8 +694,14 @@ def cmd_learn_stop(ctx: CommandContext) -> CommandResult:
 
     from pathlib import Path as _Path
 
+    import json as _json
+
     from openvibe.learn.storage import procedure_path
-    from openvibe.learn.trajectory import build_display_summary, build_summarization_content
+    from openvibe.learn.trajectory import (
+        build_ax_replay_context,
+        build_display_summary,
+        build_summarization_content,
+    )
 
     task_name = _active_task_name
     recorder = _active_recorder
@@ -703,12 +709,18 @@ def cmd_learn_stop(ctx: CommandContext) -> CommandResult:
     _active_task_name = ""
 
     trajectory = recorder.stop()
-    n_events = len(trajectory.events)
-    n_screenshots = sum(1 for e in trajectory.events if e.screenshot_after is not None)
 
     project_dir = _Path(ctx.session.info.directory)
     proc_path = procedure_path(project_dir, task_name)
     proc_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Save accessibility replay context immediately — this is the structural WHERE/HOW
+    # data derived from the OS accessibility tree.  The LLM summary will be merged in
+    # later by _start_learn_summarize.
+    ax_context = build_ax_replay_context(trajectory)
+    proc_path.write_text(
+        _json.dumps({"task_name": task_name, "ax_context": ax_context}, indent=2, ensure_ascii=False)
+    )
 
     # Build multimodal content blocks — images sent directly, never embedded in text
     content = build_summarization_content(trajectory, str(proc_path))
@@ -732,9 +744,13 @@ def cmd_learn_replay(ctx: CommandContext) -> CommandResult:
 
     from openvibe.learn.storage import load_procedure
 
-    task_name = ctx.args.strip().strip("'\"")
-    if not task_name:
-        return CommandResult(output="[red]Usage: /learn replay <taskname>[/red]")
+    # First token = task name; remaining tokens = user runtime context/instructions.
+    raw = ctx.args.strip()
+    parts = raw.split(None, 1)
+    if not parts:
+        return CommandResult(output="[red]Usage: /learn replay <taskname> [optional context][/red]")
+    task_name = parts[0].strip("'\"")
+    user_context = parts[1].strip() if len(parts) > 1 else ""
 
     project_dir = _Path(ctx.session.info.directory)
     proc = load_procedure(project_dir, task_name)
@@ -760,21 +776,57 @@ def cmd_learn_replay(ctx: CommandContext) -> CommandResult:
             )
         )
 
-    steps_text = (
-        "\n".join(f"{i + 1}. {s}" for i, s in enumerate(steps))
-        if steps
-        else "(see procedure below)"
+    ax_context = proc.get("ax_context", {})
+    ax_apps = ax_context.get("apps", [])
+    ax_events = ax_context.get("events", [])
+
+    user_context_section = (
+        f"Additional context from user: {user_context}\n\n"
+        if user_context
+        else ""
     )
 
-    replay_prompt = (
-        f"Please perform the following task: **{description}**\n\n"
-        f"Steps:\n{steps_text}\n\n"
-        f"Full procedure:\n{procedure}\n\n"
-        "Start by taking a screenshot to see the current screen state, then execute "
-        "each step using the available tools (screenshot, ui, mouse, keyboard, app, clipboard). "
-        "Use the `ui` tool first for clicking — it is more reliable than raw mouse coordinates. "
-        "Verify each step with a screenshot before proceeding."
-    )
+    # Always include the semantic description for intent context
+    intent_section = f"Task: {description}\n\n" if description else ""
+
+    if ax_apps or ax_events:
+        apps_lines = "\n".join(
+            f"  - {a['name']}"
+            + (f" (windows seen: {', '.join(repr(w) for w in a['windows'])})" if a.get("windows") else "")
+            for a in ax_apps
+        ) or "  (no app data captured)"
+
+        events_lines = "\n".join(
+            f"  {i+1}. {e['action']}"
+            + (f" → {e.get('role', '')} {repr(e['title']) if e.get('title') else ''}".rstrip())
+            + (f" [{e['app']}" + (f" > {e['window']}" if e.get('window') else "") + "]" if e.get('app') else "")
+            + (f"  key={e['key']}" if e.get('key') else "")
+            for i, e in enumerate(ax_events[:40])
+        ) or "  (no interaction data captured)"
+
+        replay_prompt = (
+            f"{user_context_section}"
+            f"{intent_section}"
+            f"Applications used during recording:\n{apps_lines}\n\n"
+            f"Recorded interactions:\n{events_lines}\n\n"
+            "Reproduce these interactions autonomously:\n"
+            "1. Take a screenshot to see the current screen.\n"
+            "2. For each recorded application that is not currently open, open it using the app tool.\n"
+            "3. Reproduce the recorded interactions in the correct windows.\n"
+            "4. Do not ask the user for help — use the tools to figure it out."
+        )
+    else:
+        # No accessibility data captured — use semantic procedure only
+        replay_prompt = (
+            f"{user_context_section}"
+            f"{intent_section}"
+            f"Procedure:\n{procedure}\n\n"
+            "Reproduce this autonomously:\n"
+            "1. Take a screenshot to see the current screen.\n"
+            "2. Open any required applications using the app tool if not already running.\n"
+            "3. Execute each step using available tools.\n"
+            "4. Do not ask the user for help — use the tools to figure it out."
+        )
 
     return CommandResult(
         output=(

@@ -104,7 +104,13 @@ class LearnRecorder:
         self._keyboard_listener.start()
 
     def stop(self) -> Trajectory:
-        """Stop recording, wait for in-flight screenshots, return trajectory."""
+        """Stop recording and return the trajectory immediately.
+
+        In-flight screenshot and accessibility futures continue running in the
+        background and write directly to their TrajectoryEvent objects.
+        _start_learn_summarize runs in its own thread and will see the completed
+        data by the time it processes the trajectory.
+        """
         self._active = False
         self._flush_key_buffer()
 
@@ -112,13 +118,6 @@ class LearnRecorder:
             self._mouse_listener.stop()
         if self._keyboard_listener is not None:
             self._keyboard_listener.stop()
-
-        # Wait for all pending screenshot captures (max 8 s each)
-        for f in list(self._pending):
-            try:
-                f.result(timeout=8.0)
-            except Exception:
-                pass
 
         self._executor.shutdown(wait=False)
         self._trajectory.stopped_at = time.time()
@@ -269,6 +268,8 @@ class LearnRecorder:
         )
         with self._lock:
             self._trajectory.events.append(event)
+        # Capture which UI element received the typing — runs in executor, non-blocking
+        self._submit_accessibility(attach_to=event)
 
     # ------------------------------------------------------------------
     # Screenshot capture  (runs in ThreadPoolExecutor — off all hot paths)
@@ -285,7 +286,27 @@ class LearnRecorder:
             self._pending = [f for f in self._pending if not f.done()]
             self._pending.append(future)
 
+    def _submit_accessibility(self, attach_to: TrajectoryEvent) -> None:
+        """Queue an accessibility-only capture (no screenshot) for a type event."""
+        def _do() -> None:
+            attach_to.accessibility_context = _ax_focused_context()
+
+        future = self._executor.submit(_do)
+        with self._lock:
+            self._pending = [f for f in self._pending if not f.done()]
+            self._pending.append(future)
+
     def _capture(self, attach_to: TrajectoryEvent | None, is_initial: bool) -> None:
+        # Accessibility context — captured first (fast, text-only, primary source)
+        if attach_to is not None and not is_initial:
+            x = attach_to.x
+            y = attach_to.y
+            if x is not None and y is not None:
+                attach_to.accessibility_context = _ax_context_at(float(x), float(y))
+            else:
+                attach_to.accessibility_context = _ax_focused_context()
+
+        # Screenshot — secondary visual reference
         try:
             import mss
             from PIL import Image
@@ -361,3 +382,99 @@ def _key_name(key) -> str:
 def _normalise_mod(name: str) -> str:
     """Map cmd_l / cmd_r → cmd, ctrl_l → ctrl, etc."""
     return name.split("_")[0] if "_" in name and name.split("_")[1] in ("l", "r") else name
+
+
+# ---------------------------------------------------------------------------
+# Accessibility context helpers  (macOS via atomacos — optional dep)
+# ---------------------------------------------------------------------------
+
+
+def _ax_attr(obj: object, *attrs: str) -> str:
+    """Safely read one of several AX attribute names from an atomacos element."""
+    for attr in attrs:
+        try:
+            val = getattr(obj, attr, None)
+            if val and isinstance(val, str):
+                return val.strip()
+        except Exception:
+            pass
+    return ""
+
+
+def _ax_context_at(x: float, y: float) -> dict:
+    """Return a semantic dict describing the UI element at screen position (x, y).
+
+    Uses macOS Accessibility API via atomacos.  Returns {} on any failure
+    (missing dep, permissions not granted, non-macOS).
+    """
+    ctx: dict = {}
+    try:
+        import atomacos  # pip install atomacos  (macOS only)
+
+        # Frontmost app — always reliable regardless of click timing
+        app = atomacos.getFrontmostApp()
+        ctx["app"] = _ax_attr(app, "AXTitle")
+
+        try:
+            win = app.AXFocusedWindow
+            ctx["window"] = _ax_attr(win, "AXTitle")
+        except Exception:
+            pass
+
+        # Element at exact screen position — the primary source of truth
+        try:
+            system = atomacos.NativeUIElement.systemwide()
+            elem = system.getElementAtPosition(x, y)
+            ctx["role"] = _ax_attr(elem, "AXRole", "AXRoleDescription")
+            ctx["title"] = _ax_attr(elem, "AXTitle", "AXDescription", "AXLabel")
+            raw_val = getattr(elem, "AXValue", None)
+            if raw_val is not None:
+                ctx["value"] = str(raw_val)[:80]
+        except Exception:
+            # Fall back to focused element (one level less precise)
+            try:
+                elem = app.AXFocusedUIElement
+                ctx["role"] = _ax_attr(elem, "AXRole", "AXRoleDescription")
+                ctx["title"] = _ax_attr(elem, "AXTitle", "AXDescription", "AXLabel")
+            except Exception:
+                pass
+
+    except ImportError:
+        pass  # atomacos not installed — graceful degradation to screenshot-only
+    except Exception:
+        pass  # accessibility permission denied or other OS error
+
+    return {k: v for k, v in ctx.items() if v}  # strip empty strings
+
+
+def _ax_focused_context() -> dict:
+    """Return accessibility context for the currently focused element.
+
+    Used for type events where there are no (x, y) coordinates.
+    """
+    ctx: dict = {}
+    try:
+        import atomacos
+
+        app = atomacos.getFrontmostApp()
+        ctx["app"] = _ax_attr(app, "AXTitle")
+
+        try:
+            win = app.AXFocusedWindow
+            ctx["window"] = _ax_attr(win, "AXTitle")
+        except Exception:
+            pass
+
+        try:
+            elem = app.AXFocusedUIElement
+            ctx["role"] = _ax_attr(elem, "AXRole", "AXRoleDescription")
+            ctx["title"] = _ax_attr(elem, "AXTitle", "AXDescription", "AXLabel")
+        except Exception:
+            pass
+
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    return {k: v for k, v in ctx.items() if v}

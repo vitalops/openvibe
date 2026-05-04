@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import contextlib
-import subprocess
-import sys
+import asyncio
 from typing import Any
 
 from textual import events as textual_events
@@ -14,25 +12,7 @@ from textual.binding import Binding
 from textual.screen import Screen
 from textual.widgets import Static
 
-
-def _copy_to_clipboard(text: str) -> bool:
-    """Copy *text* to the system clipboard.  Returns True on success."""
-    with contextlib.suppress(Exception):
-        if sys.platform == "darwin":
-            subprocess.run(["pbcopy"], input=text.encode(), check=True, timeout=2)
-            return True
-        for cmd in (
-            ["xclip", "-selection", "clipboard"],
-            ["xsel", "--clipboard", "--input"],
-            ["wl-copy"],
-        ):
-            try:
-                subprocess.run(cmd, input=text.encode(), check=True, timeout=2)
-                return True
-            except (FileNotFoundError, subprocess.SubprocessError):
-                continue
-    return False
-
+from openvibe.tui.clipboard import copy_to_clipboard as _copy_to_clipboard
 from openvibe.api import SessionState
 from openvibe.session.models import TextPart, ToolPart
 from openvibe.tui import events
@@ -293,9 +273,11 @@ class SessionScreen(Screen):
         widget = await msg_list.add_message(user_msg.id, "user")
         widget.append_text(text)
 
-        # Execute via the API layer.
+        # Execute via the API layer — run in a thread so blocking commands
+        # (e.g. /learn stop waiting for screenshot futures) don't freeze the TUI.
         session = self.app.get_session(self._session_id)  # type: ignore[attr-defined]
-        response = session.send(text)
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(None, session.send, text)
         result = response.command_result
 
         if result is None:
@@ -549,9 +531,16 @@ class SessionScreen(Screen):
                 }
 
             from pathlib import Path
-            Path(proc_path).write_text(
-                json.dumps(data, indent=2, ensure_ascii=False)
-            )
+            p = Path(proc_path)
+            # Merge with existing file (which already has ax_context saved by cmd_learn_stop)
+            existing = {}
+            if p.exists():
+                try:
+                    existing = json.loads(p.read_text())
+                except Exception:
+                    pass
+            existing.update(data)
+            p.write_text(json.dumps(existing, indent=2, ensure_ascii=False))
 
             desc = data.get("description", "")
             steps = data.get("steps", [])
@@ -755,8 +744,15 @@ class SessionScreen(Screen):
         self._refresh_header()
 
     def action_copy_last(self) -> None:
-        """Copy the last assistant message to the system clipboard (Ctrl+Y)."""
-        text = self.query_one(MessageList).get_last_assistant_text()
+        """Copy the focused message/tool widget, or last assistant message (Ctrl+Y)."""
+        from openvibe.tui.widgets.messages import MessageWidget, ToolWidget
+        from openvibe.tui.clipboard import strip_markup
+        focused = self.app.focused
+        if isinstance(focused, (MessageWidget, ToolWidget)):
+            text = focused.get_copy_text()
+        else:
+            raw = self.query_one(MessageList).get_last_assistant_text()
+            text = strip_markup(raw) if raw else ""
         if not text:
             return
         input_bar = self.query_one(InputBar)
@@ -764,6 +760,7 @@ class SessionScreen(Screen):
             input_bar.set_status("[green]Copied to clipboard.[/green]")
         else:
             input_bar.set_status("[dim]Clipboard unavailable (install xclip/xsel on Linux).[/dim]")
+        input_bar.focus_input()
         self.set_timer(2.5, self._restore_hint)
 
     def _restore_hint(self) -> None:
