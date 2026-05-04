@@ -246,11 +246,11 @@ class SessionScreen(Screen):
         # result here to avoid freezing the UI / showing a spinner.
         # Skill invocations (/skillname args) look like commands but go to
         # the LLM; route them through _start_turn instead.
-        from openvibe.commands import _COMMANDS, is_command  # noqa: PLC2701
+        from openvibe.commands import _COMMANDS, get_command, is_command  # noqa: PLC2701
 
         if is_command(event.text):
-            parts = event.text[1:].split(None, 1)
-            name = parts[0].lower() if parts else ""
+            parsed = get_command(event.text)
+            name = parsed[0] if parsed else ""
             if name in _COMMANDS:
                 await self._handle_command(event.text)
                 return
@@ -314,6 +314,7 @@ class SessionScreen(Screen):
 
         # Persist and display the result as an assistant message.
         if result.output:
+
             reply_msg = session_store.add_message(
                 db,
                 self._session_id,
@@ -325,6 +326,23 @@ class SessionScreen(Screen):
                 str(MessageRole.ASSISTANT),
             )
             result_widget.set_markup(result.output)
+
+        # Multimodal follow-up: direct LLM call with images (e.g. /learn stop).
+        # Images go straight to the API — never visible in the chat log.
+        if result.followup_content:
+            input_bar.freeze()
+            self._refresh_header(streaming=True)
+            self._start_learn_summarize(
+                result.followup_content,
+                result.followup_task_name,
+                result.followup_proc_path,
+            )
+        # Text-only follow-up: start a normal agent turn (e.g. /learn replay).
+        elif result.followup_prompt:
+            input_bar.freeze()
+            self._stream_token_count = 0
+            self._refresh_header(streaming=True)
+            self._start_turn(result.followup_prompt)
 
     # ------------------------------------------------------------------
     # Permission handling
@@ -464,6 +482,99 @@ class SessionScreen(Screen):
             self._dispatch_response(response)
         except Exception as exc:  # noqa: BLE001
             self.app.call_from_thread(self.post_message, events.StreamError(str(exc)))
+
+    @work(thread=True)
+    def _start_learn_summarize(
+        self, content: list, task_name: str, proc_path: str
+    ) -> None:
+        """Call the configured LLM directly with multimodal content, parse the
+        procedure JSON, and save it.  Images never appear in the chat log —
+        only the completion/error message is shown.
+        """
+        import json
+        import re
+
+        from openvibe.config import MessageRole
+        from openvibe.session import session as session_store
+        from openvibe.session.models import TextPart
+
+        ov = self.app.ov  # type: ignore[attr-defined]
+        db = ov._db  # type: ignore[attr-defined]
+
+        def _post_message(text: str, role: str = "assistant") -> None:
+            msg = session_store.add_message(
+                db, self._session_id,
+                MessageRole.ASSISTANT if role == "assistant" else MessageRole.ERROR,
+                [TextPart(content=text)],
+            )
+            self.app.call_from_thread(
+                self.post_message, events.NewMessage(msg.id, role)
+            )
+            self.app.call_from_thread(
+                self.post_message, events.TextDelta(msg.id, text)
+            )
+
+        try:
+            import litellm
+
+            # Resolve model string from the session config (respects user's choice)
+            cfg = ov._config
+            model_str = (
+                f"{cfg.model.provider_id}/{cfg.model.model_id}"
+                if cfg.model
+                else "openai/gpt-4o"
+            )
+
+            response = litellm.completion(
+                model=model_str,
+                messages=[{"role": "user", "content": content}],
+                timeout=120,
+            )
+            raw = response.choices[0].message.content or ""
+
+            # Extract JSON — handle optional ```json ... ``` fences
+            json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
+            if not json_match:
+                json_match = re.search(r"\{.*\}", raw, re.DOTALL)
+
+            if json_match:
+                data = json.loads(json_match.group(1) if json_match.lastindex else json_match.group())
+            else:
+                # Fallback: save raw text as the procedure
+                data = {
+                    "task_name": task_name,
+                    "description": f"Recorded task: {task_name}",
+                    "steps": [],
+                    "procedure": raw.strip(),
+                }
+
+            from pathlib import Path
+            Path(proc_path).write_text(
+                json.dumps(data, indent=2, ensure_ascii=False)
+            )
+
+            desc = data.get("description", "")
+            steps = data.get("steps", [])
+            steps_preview = (
+                "\n".join(f"  {i+1}. {s}" for i, s in enumerate(steps[:5]))
+                + ("\n  …" if len(steps) > 5 else "")
+            ) if steps else "  (see procedure file)"
+
+            _post_message(
+                f"[green]Procedure saved:[/green] [bold]{task_name}[/bold]\n"
+                f"[dim]{desc}[/dim]\n\n"
+                f"[bold]Steps:[/bold]\n{steps_preview}\n\n"
+                f"[dim]Run [bold]/learn replay {task_name}[/bold] to execute.[/dim]"
+            )
+
+        except Exception as exc:  # noqa: BLE001
+            _post_message(
+                f"[red]Failed to generate procedure for '{task_name}':[/red] {exc}\n"
+                "[dim]Check your model config and try again.[/dim]",
+                role="error",
+            )
+
+        self.app.call_from_thread(self.post_message, events.TurnCompleted(""))
 
     @work(thread=True)
     def _start_resume_interrupted_turn(self, allow: bool) -> None:

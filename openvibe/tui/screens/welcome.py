@@ -24,7 +24,7 @@ _HELP = """\
 [bold]Ctrl+N[/bold]  new session    \
 [bold]Ctrl+A[/bold]  full permission    \
 [bold]Ctrl+S[/bold]  sessions    \
-[bold]Ctrl+Q[/bold]  quit\
+[bold]Ctrl+Q[/bold]  /  [bold]:q[/bold]  quit\
 """
 
 
