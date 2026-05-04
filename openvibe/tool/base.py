@@ -228,7 +228,8 @@ def create_default_registry() -> ToolRegistry:
     from openvibe.tool.computer_mouse import MouseTool
     from openvibe.tool.computer_screenshot import ScreenshotTool
     from openvibe.tool.computer_ui import UITool
-    from openvibe.tool.sim_tool import SimTool
+    from openvibe.tool.computer_clipboard import ClipboardTool
+    from openvibe.tool.computer_ocr import OCRTool
 
     registry = ToolRegistry()
     for tool in [
@@ -248,7 +249,8 @@ def create_default_registry() -> ToolRegistry:
         MouseTool(),
         KeyboardTool(),
         AppTool(),
-        SimTool(),
+        ClipboardTool(),
+        OCRTool(),
     ]:
         registry.register(tool)
     return registry

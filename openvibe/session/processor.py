@@ -123,13 +123,17 @@ class SessionProcessor:
         # 2. Build LLM message history
         history = session_store.list_messages(self._db, session.id)
 
-        # 3. Construct tools list for this agent
+        # 3. Auto-inject computer-use instructions when the task involves the desktop
+        if _detect_computer_use_intent(user_text):
+            agent = _with_computer_use_instructions(agent)
+
+        # 4. Construct tools list for this agent
         tool_defs = _build_tool_definitions(self._registry, agent)
 
-        # 4. Permission rules for this agent
+        # 5. Permission rules for this agent
         rules: list["Rule"] = list(agent.permission_rules)
 
-        # 5. Main loop
+        # 6. Main loop
         doom_counts: dict[str, int] = {}  # key: "tool:args_json" → count
         assistant_msg: MessageInfo | None = None
 
@@ -629,6 +633,58 @@ def _build_tool_definitions(
         for t in registry.all()
         if t.name not in disabled
     ]
+
+
+_COMPUTER_USE_KEYWORDS = frozenset([
+    # screen / display
+    "screen", "screenshot", "desktop", "window", "display", "monitor",
+    # apps / GUI
+    "click", "button", "menu", "toolbar", "dialog", "popup", "modal",
+    "open app", "launch", "application", "browser", "chrome", "firefox",
+    "safari", "finder", "explorer", "vscode", "vs code",
+    # interaction
+    "type into", "fill in", "drag", "scroll", "right-click", "double-click",
+    "keyboard shortcut", "hotkey", "copy paste",
+    # GUI-specific tasks
+    "ui", "gui", "interface", "form", "dropdown", "checkbox", "tab",
+    "notification", "toast", "alert",
+])
+
+_COMPUTER_USE_ADDENDUM = """\
+COMPUTER-USE WORKFLOW (active for this request):
+
+Tool priority:
+1. ui tool (preferred — no coordinates needed)
+   • ui get_tree  → list clickable elements by name
+   • ui click <title>  → click by element name
+   • ui click_menu "File > Save"  → trigger menu items
+   • ui type <text>  → type text (handles Unicode)
+   • ui press_key <key>  → e.g. return, escape, cmd+s
+2. app tool  → open / close / focus applications
+3. screenshot  → observe screen state; always take one after opening an app
+4. mouse (last resort — only for unlabelled canvas areas)
+   • MUST provide image_width and image_height from screenshot output
+5. keyboard → raw keystroke fallback
+
+Verification: after every action take a screenshot and confirm the change.
+If "No visible change detected", do NOT repeat — reassess with ui get_tree.
+Never move the mouse to (0, 0).
+"""
+
+
+def _detect_computer_use_intent(user_text: str) -> bool:
+    """Return True if the user message likely involves desktop/GUI interaction."""
+    low = user_text.lower()
+    return any(kw in low for kw in _COMPUTER_USE_KEYWORDS)
+
+
+def _with_computer_use_instructions(agent: "AgentInfo") -> "AgentInfo":
+    """Return a copy of *agent* with the CU workflow addendum appended."""
+    import dataclasses
+    return dataclasses.replace(
+        agent,
+        extra_instructions=list(agent.extra_instructions) + [_COMPUTER_USE_ADDENDUM],
+    )
 
 
 def _build_system_prompt(agent: "AgentInfo") -> str:

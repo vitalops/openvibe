@@ -36,13 +36,20 @@ class ActionType(str, Enum):
     MOUSE_MOVE = "mouse_move"
     MOUSE_SCROLL = "mouse_scroll"
     MOUSE_DRAG = "mouse_drag"
+    MOUSE_DOWN = "mouse_down"
+    MOUSE_UP = "mouse_up"
+    CURSOR_POSITION = "cursor_position"
     KEYBOARD_TYPE = "keyboard_type"
     KEYBOARD_PRESS = "keyboard_press"
     KEYBOARD_HOTKEY = "keyboard_hotkey"
+    KEYBOARD_HOLD = "keyboard_hold"
     APP_OPEN = "app_open"
     APP_CLOSE = "app_close"
     APP_FOCUS = "app_focus"
     APP_LIST = "app_list"
+    CLIPBOARD_READ = "clipboard_read"
+    CLIPBOARD_WRITE = "clipboard_write"
+    OCR = "ocr"
 
 
 # ---------------------------------------------------------------------------

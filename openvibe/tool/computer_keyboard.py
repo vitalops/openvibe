@@ -122,12 +122,14 @@ class KeyboardTool(Tool):
     )
 
     class Params(Tool.Params):
-        action: Literal["type", "press", "hotkey"] = Field(
+        action: Literal["type", "press", "hotkey", "hold"] = Field(
             description=(
                 "Keyboard action:\n"
                 "  type   — type a string of text (use for entering text into fields)\n"
                 "  press  — press a single named key, e.g. 'enter', 'escape', 'tab'\n"
-                "  hotkey — send a key combination, e.g. keys=['ctrl','c'] for copy"
+                "  hotkey — send a key combination, e.g. keys=['ctrl','c'] for copy\n"
+                "  hold   — hold a key down for 'hold_duration' seconds then release "
+                "(useful for shift+click preparation or timed key presses)"
             )
         )
         text: str | None = Field(
@@ -154,6 +156,13 @@ class KeyboardTool(Tool):
             description=(
                 "Milliseconds to wait after the action for the UI to settle before returning. "
                 "Increase for slow apps. Default 300."
+            ),
+        )
+        hold_duration: float = Field(
+            default=1.0,
+            description=(
+                "Seconds to hold the key down for action='hold'. "
+                "The key is pressed, held for this duration, then released. Default 1.0."
             ),
         )
 
@@ -198,6 +207,7 @@ class KeyboardTool(Tool):
             "type": ActionType.KEYBOARD_TYPE,
             "press": ActionType.KEYBOARD_PRESS,
             "hotkey": ActionType.KEYBOARD_HOTKEY,
+            "hold": ActionType.KEYBOARD_HOLD,
         }
         await sandbox.record_action(
             action_type_map.get(params.action, ActionType.KEYBOARD_TYPE),
@@ -237,5 +247,16 @@ class KeyboardTool(Tool):
             time.sleep(settle)
             combo = "+".join(params.keys)
             return f"Pressed hotkey: {combo}"
+
+        if params.action == "hold":
+            if not params.key:
+                raise ValueError("key is required for action='hold'.")
+            pag.keyDown(params.key)
+            time.sleep(max(0.0, params.hold_duration))
+            pag.keyUp(params.key)
+            time.sleep(settle)
+            return (
+                f"Held key {params.key!r} for {params.hold_duration:.2f}s then released."
+            )
 
         raise ValueError(f"Unknown keyboard action: {params.action!r}")

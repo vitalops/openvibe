@@ -60,19 +60,37 @@ class MouseTool(Tool):
     )
 
     class Params(Tool.Params):
-        action: Literal["move", "click", "double_click", "right_click", "scroll", "drag"] = Field(
+        action: Literal[
+            "move", "click", "double_click", "triple_click",
+            "right_click", "middle_click",
+            "left_down", "left_up",
+            "scroll", "drag",
+            "cursor_position",
+        ] = Field(
             description=(
                 "Mouse action to perform:\n"
-                "  move         — move pointer to (x, y) without clicking\n"
-                "  click        — left-click at (x, y)\n"
-                "  double_click — double left-click at (x, y)\n"
-                "  right_click  — right-click at (x, y)\n"
-                "  scroll       — scroll wheel at (x, y) by 'amount' ticks\n"
-                "  drag         — drag from (x, y) to (end_x, end_y)"
+                "  move           — move pointer to (x, y) without clicking\n"
+                "  click          — left-click at (x, y)\n"
+                "  double_click   — double left-click at (x, y)\n"
+                "  triple_click   — triple left-click at (x, y) (select word/line)\n"
+                "  right_click    — right-click at (x, y)\n"
+                "  middle_click   — middle-click at (x, y) (open link in new tab, etc.)\n"
+                "  left_down      — press and hold left button at (x, y) without releasing\n"
+                "  left_up        — release left button at (x, y)\n"
+                "  scroll         — scroll at (x, y); use 'direction' (up/down/left/right) "
+                "and 'amount' clicks\n"
+                "  drag           — drag from (x, y) to (end_x, end_y)\n"
+                "  cursor_position — return the current cursor location (no x/y needed)"
             )
         )
-        x: int = Field(description="X coordinate as it appears in the screenshot image.")
-        y: int = Field(description="Y coordinate as it appears in the screenshot image.")
+        x: int = Field(
+            default=0,
+            description="X coordinate as it appears in the screenshot image.",
+        )
+        y: int = Field(
+            default=0,
+            description="Y coordinate as it appears in the screenshot image.",
+        )
         end_x: int | None = Field(
             default=None,
             description="Target X coordinate for drag action (image pixels).",
@@ -96,9 +114,21 @@ class MouseTool(Tool):
                 "Height of the screenshot image. Provide alongside image_width."
             ),
         )
+        direction: Literal["up", "down", "left", "right"] | None = Field(
+            default=None,
+            description=(
+                "Scroll direction: 'up', 'down', 'left', or 'right'. "
+                "Used with action='scroll'. When provided, 'amount' is the number "
+                "of scroll clicks in that direction. "
+                "If omitted, positive amount = up/right, negative = down/left."
+            ),
+        )
         amount: int = Field(
             default=3,
-            description="Scroll ticks (positive = up/right, negative = down/left). Used only for scroll.",
+            description=(
+                "Scroll amount in clicks (default 3). Used with action='scroll'. "
+                "Positive = up/right when 'direction' is not set."
+            ),
         )
         duration: float = Field(
             default=0.25,
@@ -144,6 +174,31 @@ class MouseTool(Tool):
             except Exception:
                 pass  # scaling is best-effort; never block the action
         # ─────────────────────────────────────────────────────────────────────
+
+        # cursor_position requires no coordinates and no scaling
+        if params.action == "cursor_position":
+            await ctx.check_permission(
+                tool="mouse",
+                argument="cursor_position",
+                description="Query current cursor position",
+            )
+            try:
+                pag = _pyautogui()
+                cx, cy = pag.position()
+                sandbox = get_sandbox(ctx.session_id)
+                await sandbox.record_action(
+                    ActionType.CURSOR_POSITION,
+                    params={},
+                    result=f"({cx},{cy})",
+                )
+                return ToolResult(
+                    title="Cursor position",
+                    output=f"Current cursor position: ({cx}, {cy})",
+                )
+            except Exception as exc:
+                return ToolResult(
+                    title="Cursor position error", output=str(exc), error=True
+                )
 
         action_label = f"mouse {params.action} at ({params.x}, {params.y})"
         await ctx.check_permission(
@@ -192,7 +247,11 @@ class MouseTool(Tool):
             "move": ActionType.MOUSE_MOVE,
             "click": ActionType.MOUSE_CLICK,
             "double_click": ActionType.MOUSE_CLICK,
+            "triple_click": ActionType.MOUSE_CLICK,
             "right_click": ActionType.MOUSE_CLICK,
+            "middle_click": ActionType.MOUSE_CLICK,
+            "left_down": ActionType.MOUSE_DOWN,
+            "left_up": ActionType.MOUSE_UP,
             "scroll": ActionType.MOUSE_SCROLL,
             "drag": ActionType.MOUSE_DRAG,
         }
@@ -232,22 +291,71 @@ class MouseTool(Tool):
             time.sleep(settle)
             return f"Double-clicked at ({params.x}, {params.y})."
 
+        if params.action == "triple_click":
+            # Triple click = select word / full line in most text editors
+            pag.click(params.x, params.y, duration=params.duration, clicks=3, interval=0.05)
+            time.sleep(settle)
+            return f"Triple-clicked at ({params.x}, {params.y})."
+
         if params.action == "right_click":
             pag.rightClick(params.x, params.y, duration=params.duration)
             time.sleep(settle)
             return f"Right-clicked at ({params.x}, {params.y})."
 
+        if params.action == "middle_click":
+            pag.middleClick(params.x, params.y)
+            time.sleep(settle)
+            return f"Middle-clicked at ({params.x}, {params.y})."
+
+        if params.action == "left_down":
+            pag.moveTo(params.x, params.y, duration=params.duration)
+            pag.mouseDown(button="left")
+            time.sleep(settle)
+            return f"Left button pressed at ({params.x}, {params.y}) — button is held."
+
+        if params.action == "left_up":
+            pag.moveTo(params.x, params.y, duration=params.duration)
+            pag.mouseUp(button="left")
+            time.sleep(settle)
+            return f"Left button released at ({params.x}, {params.y})."
+
         if params.action == "scroll":
+            # Directional scroll: map direction to pyautogui scroll / hscroll
+            direction = params.direction
+            if direction in ("up", "down"):
+                clicks = params.amount if direction == "up" else -params.amount
+                pag.scroll(clicks, x=params.x, y=params.y)
+                time.sleep(settle)
+                return (
+                    f"Scrolled {direction} {params.amount} click(s) "
+                    f"at ({params.x}, {params.y})."
+                )
+            if direction in ("left", "right"):
+                clicks = params.amount if direction == "right" else -params.amount
+                pag.hscroll(clicks, x=params.x, y=params.y)
+                time.sleep(settle)
+                return (
+                    f"Scrolled {direction} {params.amount} click(s) "
+                    f"at ({params.x}, {params.y})."
+                )
+            # Legacy: no direction — use signed amount (positive = up)
             pag.scroll(params.amount, x=params.x, y=params.y)
             time.sleep(settle)
-            direction = "up" if params.amount > 0 else "down"
-            return f"Scrolled {direction} by {abs(params.amount)} ticks at ({params.x}, {params.y})."
+            scroll_dir = "up" if params.amount > 0 else "down"
+            return (
+                f"Scrolled {scroll_dir} by {abs(params.amount)} click(s) "
+                f"at ({params.x}, {params.y})."
+            )
 
         if params.action == "drag":
             if params.end_x is None or params.end_y is None:
                 raise ValueError("end_x and end_y are required for drag action.")
             pag.moveTo(params.x, params.y, duration=0.1)
-            pag.dragTo(params.end_x, params.end_y, duration=params.duration, mouseDownUp=True)
+            pag.dragTo(
+                params.end_x, params.end_y,
+                duration=params.duration,
+                mouseDownUp=True,
+            )
             time.sleep(params.settle_ms / 1000.0)
             return (
                 f"Dragged from ({params.x}, {params.y}) "

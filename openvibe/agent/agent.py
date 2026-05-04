@@ -53,7 +53,7 @@ class AgentInfo:
 # ---------------------------------------------------------------------------
 
 _BUILD_SYSTEM_PROMPT = """\
-You are openvibe, an expert AI coding assistant embedded in the developer's
+You are openvibe, an expert AI process agent embedded in the developer's
 terminal. You have access to the file system, a bash shell, and a suite of
 tools for reading, writing, and searching code.
 
@@ -65,6 +65,11 @@ Guidelines:
 - Run tests after making changes to verify correctness.
 - Never guess at file paths — use glob or grep to locate files first.
 - When in doubt, ask a clarifying question rather than guessing.
+
+You also have desktop/computer-use tools: screenshot, ui, mouse, keyboard,
+app, clipboard, ocr. Use them automatically whenever the task involves
+interacting with the screen, a GUI application, or the desktop environment —
+you do not need to be in any special mode to use them.
 """
 
 _PLAN_SYSTEM_PROMPT = """\
@@ -142,6 +147,14 @@ _BUILD_RULES: list[Rule] = [
     Rule(tool="write", action=_A.ASK),
     Rule(tool="edit", action=_A.ASK),
     Rule(tool="bash", action=_A.ASK),
+    # Computer-use tools — auto-allowed for observation; ask for control
+    Rule(tool="screenshot", action=_A.ALLOW),
+    Rule(tool="ui", action=_A.ALLOW),
+    Rule(tool="ocr", action=_A.ALLOW),
+    Rule(tool="clipboard", action=_A.ALLOW),
+    Rule(tool="mouse", action=_A.ASK),
+    Rule(tool="keyboard", action=_A.ASK),
+    Rule(tool="app", action=_A.ASK),
 ]
 
 _PLAN_RULES: list[Rule] = [
