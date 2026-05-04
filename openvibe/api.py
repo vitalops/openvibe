@@ -174,6 +174,7 @@ class Session:
         self._permissions = permissions
         self._state = SessionState.IDLE
         self._lock = threading.Lock()
+        self._full_permission = False  # set by create_full_permission_session
 
         # Stored callbacks — set by send/send_nowait, reused by reply/reply_nowait
         self._on_message: Callable[[str, str], None] | None = None
@@ -582,9 +583,22 @@ class Session:
         on_token: Callable[[str], None] | None,
         callback: Callable[[Response], None] | None,
     ) -> None:
+        import dataclasses
+
         from openvibe.agent.agent import resolve as _resolve
+        from openvibe.config import PermissionAction
+        from openvibe.permission.permission import Rule
 
         agent = _resolve(self._config, self._agent_name)
+
+        if self._full_permission:
+            # Prepend a wildcard ALLOW rule so every tool call is auto-approved
+            # regardless of what individual agent rules say.
+            agent = dataclasses.replace(
+                agent,
+                permission_rules=[Rule(tool="*", action=PermissionAction.ALLOW)]
+                + list(agent.permission_rules),
+            )
 
         if self._processor is not None:
             # Async processor path — full-featured (bus events, real-time tools, etc.)
@@ -828,6 +842,40 @@ class OpenVibe:
             bus=self._bus,
             permissions=self._permissions,
         )
+
+    def create_full_permission_session(
+        self,
+        agent: str = "build",
+        title: str | None = None,
+    ) -> Session:
+        """Create a session where every tool call is auto-approved without prompting.
+
+        The caller has explicitly opted in to unrestricted tool access for the
+        lifetime of this session.  The session is otherwise identical to a
+        regular session (same agent, same tools, same model).
+        """
+        self._require_started()
+        from openvibe.session import session as _store
+
+        info = _store.create(
+            self._db,
+            project_id=self._project.id,
+            directory=str(self._project_dir),
+            title=title or "full permission",
+        )
+        session = Session(
+            info,
+            self._db,
+            self._registry,
+            self._config,
+            agent,
+            self._llm,
+            processor=self._processor,
+            bus=self._bus,
+            permissions=self._permissions,
+        )
+        session._full_permission = True
+        return session
 
     def get_session(self, session_id: str, agent: str = "build") -> Session:
         self._require_started()

@@ -92,6 +92,13 @@ class OpenvibeApp(App[None]):
             self._session_cache[session_id] = self.ov.get_session(session_id)
         return self._session_cache[session_id]
 
+    def create_full_permission_session(self) -> Any:
+        """Create a full-permission session, cache it, and return it."""
+        assert self.ov is not None
+        session = self.ov.create_full_permission_session()
+        self._session_cache[session.id] = session
+        return session
+
     def set_pending_permission(self, session_id: str, pending: Any) -> None:
         """Store or clear the pending-permission dict for a session."""
         if pending is None:

@@ -22,6 +22,7 @@ _TAGLINE = "AI coding agent for your terminal"
 
 _HELP = """\
 [bold]Ctrl+N[/bold]  new session    \
+[bold]Ctrl+A[/bold]  full permission    \
 [bold]Ctrl+S[/bold]  sessions    \
 [bold]Ctrl+Q[/bold]  quit\
 """
@@ -90,10 +91,14 @@ class WelcomeScreen(Screen[None]):
     #actions Button {
         margin: 0 1;
     }
+    #full-perm {
+        border: solid $warning;
+    }
     """
 
     BINDINGS = [
         Binding("ctrl+n", "new_session", "New session", show=False),
+        Binding("ctrl+a", "full_permission_session", "Full permission session", show=False),
         Binding("ctrl+s", "all_sessions", "All sessions", show=False),
         Binding("ctrl+q", "quit", "Quit", show=False),
         Binding("q", "quit", "Quit", show=False),
@@ -116,6 +121,7 @@ class WelcomeScreen(Screen[None]):
                 yield Static("No sessions yet — start one below.", id="no-recent")
                 with Center(id="actions"):
                     yield Button("New Session", id="new", variant="primary")
+                    yield Button("Full Permission", id="full-perm", variant="warning")
                     yield Button("All Sessions", id="all", variant="default")
                     yield Button("Quit", id="quit-btn", variant="error")
 
@@ -159,6 +165,8 @@ class WelcomeScreen(Screen[None]):
         match event.button.id:
             case "new":
                 self.action_new_session()
+            case "full-perm":
+                self.action_full_permission_session()
             case "all":
                 self.action_all_sessions()
             case "quit-btn":
@@ -171,6 +179,10 @@ class WelcomeScreen(Screen[None]):
     def action_new_session(self) -> None:
         ov = self.app.ov  # type: ignore[attr-defined]
         session = ov.create_session()
+        self._open_session(session.id)
+
+    def action_full_permission_session(self) -> None:
+        session = self.app.create_full_permission_session()  # type: ignore[attr-defined]
         self._open_session(session.id)
 
     def action_all_sessions(self) -> None:

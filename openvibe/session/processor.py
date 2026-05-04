@@ -586,6 +586,7 @@ class SessionProcessor:
             abort=abort,
             call_id=call_id,
             _permissions=self._permissions,
+            _permission_rules=list(rules),
         )
         # Inject DB reference for tools that need it (todo, etc.)
         ctx._db = self._db  # type: ignore[attr-defined]

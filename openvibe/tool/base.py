@@ -56,7 +56,7 @@ from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from openvibe.llm import Message
-    from openvibe.permission.permission import PermissionService
+    from openvibe.permission.permission import PermissionService, Rule
 
 MAX_OUTPUT_CHARS = 4_000
 
@@ -80,6 +80,9 @@ class ToolContext:
     # Permission service is injected so tools can call ctx.check_permission()
     _permissions: "PermissionService | None" = field(default=None, repr=False)
     _messages: list["Message"] = field(default_factory=list, repr=False)
+    # Agent-level rules evaluated before the global DB rules.
+    # When set, DB rules are skipped so the agent's ruleset is authoritative.
+    _permission_rules: "list[Rule]" = field(default_factory=list, repr=False)
 
     async def check_permission(
         self, tool: str, argument: str | None = None, description: str = ""
@@ -89,7 +92,10 @@ class ToolContext:
             await self._permissions.check(
                 tool=tool,
                 argument=argument,
-                project_id=self.project_id,
+                # Use agent-level rules when present; this also skips the DB
+                # lookup so the agent's ruleset is the sole authority.
+                rules=self._permission_rules or None,
+                project_id=self.project_id if not self._permission_rules else None,
                 session_id=self.session_id,
                 description=description,
             )
