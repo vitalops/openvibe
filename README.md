@@ -314,7 +314,23 @@ with OpenVibe() as ov:
 
 ## Full Documentation
 
-See [`openvibe/DOCS.md`](openvibe/DOCS.md) for the complete reference covering all API methods, tool parameters, skill authoring, permission rules, config schema, MCP, and architecture.
+See the [`docs/`](docs/) folder for the complete reference:
+
+| | |
+|-|-|
+| [Installation](docs/installation.md) | Requirements, extras, first run |
+| [API](docs/api.md) | Headless Python API — `OpenVibe`, `Session` |
+| [TUI](docs/tui.md) | Terminal interface, key bindings, slash commands |
+| [Tools](docs/tools.md) | All built-in tools and parameters |
+| [Agents](docs/agents.md) | Built-in and custom agents |
+| [Skills](docs/skills.md) | Built-in skills, writing custom skills |
+| [Learn & Replay](docs/learn.md) | Record and replay computer tasks |
+| [Permissions](docs/permissions.md) | Modes, rules, storage |
+| [Configuration](docs/configuration.md) | `openvibe.json` schema |
+| [MCP](docs/mcp.md) | Model Context Protocol integration |
+| [Custom Tools](docs/custom-tools.md) | Writing your own tools |
+| [Providers](docs/providers.md) | Multi-provider LLM support |
+| [Architecture](docs/architecture.md) | Component map and data flow |
 
 ---
 
