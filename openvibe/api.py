@@ -174,7 +174,7 @@ class Session:
         self._permissions = permissions
         self._state = SessionState.IDLE
         self._lock = threading.Lock()
-        self._full_permission = False  # set by create_full_permission_session
+        self._permission_mode: str = "default"  # PermissionMode value
 
         # Stored callbacks — set by send/send_nowait, reused by reply/reply_nowait
         self._on_message: Callable[[str, str], None] | None = None
@@ -591,13 +591,18 @@ class Session:
 
         agent = _resolve(self._config, self._agent_name)
 
-        if self._full_permission:
-            # Prepend a wildcard ALLOW rule so every tool call is auto-approved
-            # regardless of what individual agent rules say.
+        if self._permission_mode == "bypass":
+            # Prepend a wildcard ALLOW rule so every tool call is auto-approved.
             agent = dataclasses.replace(
                 agent,
                 permission_rules=[Rule(tool="*", action=PermissionAction.ALLOW)]
                 + list(agent.permission_rules),
+            )
+        elif self._permission_mode == "smart":
+            from openvibe.permission.permission import SMART_MODE_RULES
+            agent = dataclasses.replace(
+                agent,
+                permission_rules=list(SMART_MODE_RULES) + list(agent.permission_rules),
             )
 
         if self._processor is not None:
@@ -821,38 +826,18 @@ class OpenVibe:
         self,
         agent: str = "build",
         title: str | None = None,
+        mode: str = "default",
     ) -> Session:
-        self._require_started()
-        from openvibe.session import session as _store
+        """Create a new session.
 
-        info = _store.create(
-            self._db,
-            project_id=self._project.id,
-            directory=str(self._project_dir),
-            title=title,
-        )
-        return Session(
-            info,
-            self._db,
-            self._registry,
-            self._config,
-            agent,
-            self._llm,
-            processor=self._processor,
-            bus=self._bus,
-            permissions=self._permissions,
-        )
+        *mode* controls how tool permission requests are handled:
 
-    def create_full_permission_session(
-        self,
-        agent: str = "build",
-        title: str | None = None,
-    ) -> Session:
-        """Create a session where every tool call is auto-approved without prompting.
-
-        The caller has explicitly opted in to unrestricted tool access for the
-        lifetime of this session.  The session is otherwise identical to a
-        regular session (same agent, same tools, same model).
+        * ``"default"``  — ask the user for every tool call.
+        * ``"smart"``    — pre-approve common safe operations (file reads/edits,
+                           read-only bash, running tests) so the agent can work
+                           without constant interruption.
+        * ``"bypass"``   — auto-approve everything; use only when you fully
+                           trust the task being performed.
         """
         self._require_started()
         from openvibe.session import session as _store
@@ -861,7 +846,7 @@ class OpenVibe:
             self._db,
             project_id=self._project.id,
             directory=str(self._project_dir),
-            title=title or "full permission",
+            title=title,
         )
         session = Session(
             info,
@@ -874,8 +859,19 @@ class OpenVibe:
             bus=self._bus,
             permissions=self._permissions,
         )
-        session._full_permission = True
+        session._permission_mode = mode
         return session
+
+    def create_full_permission_session(
+        self,
+        agent: str = "build",
+        title: str | None = None,
+    ) -> Session:
+        """Convenience wrapper — creates a session with mode='bypass'.
+
+        Kept for backward compatibility; prefer ``create_session(mode='bypass')``.
+        """
+        return self.create_session(agent=agent, title=title or "bypass", mode="bypass")
 
     def get_session(self, session_id: str, agent: str = "build") -> Session:
         self._require_started()

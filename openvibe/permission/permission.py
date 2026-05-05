@@ -22,6 +22,7 @@ import fnmatch
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from openvibe.bus import Event, EventBus
@@ -29,6 +30,25 @@ from openvibe.config import PermissionAction
 
 if TYPE_CHECKING:
     from openvibe.db import Database
+
+
+# ---------------------------------------------------------------------------
+# Permission modes
+# ---------------------------------------------------------------------------
+
+
+class PermissionMode(StrEnum):
+    """Session-level permission mode.
+
+    default  — ask the user for every tool call (safe for untrusted tasks).
+    smart    — pre-approve common safe operations (file reads/edits, safe bash)
+               so the agent can work without constant interruption.
+    bypass   — auto-approve everything; use only when you fully trust the task.
+    """
+
+    DEFAULT = "default"
+    SMART = "smart"
+    BYPASS = "bypass"
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +105,59 @@ class Rule:
     tool: str  # exact name or glob
     action: PermissionAction
     pattern: str | None = None  # optional path/argument glob
+
+
+def _allow(tool: str, pattern: str | None = None) -> "Rule":
+    return Rule(tool=tool, action=PermissionAction.ALLOW, pattern=pattern)
+
+
+# Pre-approved rules for PermissionMode.SMART.
+# These cover common safe developer operations so the agent can work without
+# interruption on routine tasks.  Destructive or network-accessing commands
+# (rm, curl, wget, ssh, etc.) still require explicit user approval.
+SMART_MODE_RULES: list[Rule] = [
+    # Read-only tools — completely safe
+    _allow("read"),
+    _allow("glob"),
+    _allow("grep"),
+    # Screenshot / accessibility — observing the screen is read-only
+    _allow("screenshot"),
+    # File editing — the core "acceptEdits" behaviour
+    _allow("write"),
+    _allow("edit"),
+    # Safe bash: filesystem exploration
+    _allow("bash", "ls*"),
+    _allow("bash", "cat *"),
+    _allow("bash", "head *"),
+    _allow("bash", "tail *"),
+    _allow("bash", "find *"),
+    _allow("bash", "echo *"),
+    _allow("bash", "pwd"),
+    _allow("bash", "wc *"),
+    _allow("bash", "diff *"),
+    # Directory management
+    _allow("bash", "mkdir*"),
+    _allow("bash", "touch *"),
+    # File movement (non-destructive copies/moves within cwd)
+    _allow("bash", "cp *"),
+    _allow("bash", "mv *"),
+    # Read-only git operations
+    _allow("bash", "git status*"),
+    _allow("bash", "git log*"),
+    _allow("bash", "git diff*"),
+    _allow("bash", "git show*"),
+    _allow("bash", "git branch*"),
+    _allow("bash", "git stash list*"),
+    # Running code / tests (common dev workflow)
+    _allow("bash", "python*"),
+    _allow("bash", "python3*"),
+    _allow("bash", "pip*"),
+    _allow("bash", "uv *"),
+    _allow("bash", "npm *"),
+    _allow("bash", "node *"),
+    _allow("bash", "cargo *"),
+    _allow("bash", "go *"),
+]
 
 
 def _matches(rule: Rule, tool: str, argument: str | None = None) -> bool:
