@@ -174,6 +174,7 @@ class Session:
         self._permissions = permissions
         self._state = SessionState.IDLE
         self._lock = threading.Lock()
+        self._permission_mode: str = "default"  # PermissionMode value
 
         # Stored callbacks — set by send/send_nowait, reused by reply/reply_nowait
         self._on_message: Callable[[str, str], None] | None = None
@@ -266,9 +267,12 @@ class Session:
     # ------------------------------------------------------------------
 
     def _try_command(self, text: str) -> Response | None:
-        """If *text* is a slash command, execute it and return a Response."""
-        from openvibe.commands import (CommandContext, execute, get_command,
-                                       is_command)
+        """If *text* is a registered slash command, execute it and return a Response.
+
+        Returns ``None`` for unrecognised names so that ``_try_skill`` can
+        handle skill invocations before we fall through to the LLM.
+        """
+        from openvibe.commands import CommandContext, _COMMANDS, execute, get_command, is_command  # noqa: PLC2701
 
         if not is_command(text):
             return None
@@ -276,6 +280,10 @@ class Session:
         if parsed is None:
             return None
         name, args = parsed
+        # Only handle names that are registered as slash commands; unknown
+        # names may be skill invocations — let _try_skill decide.
+        if name not in _COMMANDS:
+            return None
         ctx = CommandContext(session=self, args=args)
         result = execute(name, ctx)
         return Response(
@@ -283,6 +291,70 @@ class Session:
             text=result.output,
             command_result=result,
         )
+
+    def _try_skill(self, text: str) -> str | None:
+        """If *text* is a skill invocation (``/name args``), return the expanded prompt.
+
+        Returns ``None`` when the text is not a skill invocation so that the
+        caller can fall through to the normal LLM path.
+        """
+        from openvibe.commands import is_command
+        from openvibe.skill.registry import get_registry
+
+        if not is_command(text):
+            return None
+        parts = text[1:].split(None, 1)
+        name = parts[0].lower()
+        args = parts[1] if len(parts) > 1 else ""
+        skill = get_registry().get(name)
+        if skill is None:
+            return None
+        return skill.get_prompt(args)
+
+    def _try_auto_route(self, text: str) -> str | None:
+        """Match user intent against registered skills without an explicit ``/`` prefix.
+
+        Scores every user-invocable skill and invokes the best match when its
+        confidence exceeds the threshold (0.4).  Returns ``None`` when no skill
+        is confident enough, letting the message fall through to the plain LLM.
+        """
+        from openvibe.skill.registry import get_registry
+
+        if text.startswith("/"):
+            return None  # already handled by _try_skill
+
+        registry = get_registry()
+        best_skill = None
+        best_score = 0.0
+
+        for skill in registry.all():
+            if not skill.user_invocable:
+                continue
+            score = skill.match_intent(text)
+            if score > best_score:
+                best_score = score
+                best_skill = skill
+
+        if best_skill is None or best_score < 0.4:
+            return None
+
+        args = best_skill.extract_args(text)
+        return best_skill.get_prompt(args)
+
+    def _send_raw(
+        self,
+        text: str,
+        on_token: Callable[[str], None] | None = None,
+    ) -> Response:
+        """Send *text* directly to the LLM without command/skill interception.
+
+        Used internally by the :class:`~openvibe.skill.executor.SkillExecutor`
+        so that retry prompts bypass the skill expansion layer.  Assumes the
+        FSM is already in THINKING state when called from within the skill
+        executor loop.
+        """
+        self._launch_worker(text, on_token, callback=None)
+        return self._collect()
 
     def send(
         self,
@@ -299,15 +371,26 @@ class Session:
         * an error occurs             → Response(state=ERROR)
 
         Slash commands (``/help``, ``/cost``, etc.) are handled locally and
-        never reach the LLM.
+        never reach the LLM.  Skill invocations (``/simplify``, ``/debug``,
+        etc.) are expanded into full LLM prompts before being sent.
 
         *on_message(msg_id, role)* — called when a new message is created.
         *on_tool(msg_id, part_index, state_dict)* — called on tool state changes.
         """
-        # Slash commands bypass the LLM entirely.
+        # 1. Slash commands bypass the LLM entirely.
         cmd_response = self._try_command(text)
         if cmd_response is not None:
             return cmd_response
+
+        # 2. Explicit skill invocations (``/name args``): expand prompt.
+        expanded = self._try_skill(text)
+        if expanded is not None:
+            text = expanded
+        else:
+            # 3. Intent-based auto-routing: match natural language to skills.
+            auto = self._try_auto_route(text)
+            if auto is not None:
+                text = auto
 
         with self._lock:
             if self._state not in (SessionState.IDLE, SessionState.ERROR):
@@ -367,6 +450,16 @@ class Session:
             if callback:
                 callback(cmd_response)
             return
+
+        # Explicit skill invocations (``/name args``): expand prompt.
+        expanded = self._try_skill(text)
+        if expanded is not None:
+            text = expanded
+        else:
+            # Intent-based auto-routing.
+            auto = self._try_auto_route(text)
+            if auto is not None:
+                text = auto
 
         with self._lock:
             if self._state not in (SessionState.IDLE, SessionState.ERROR):
@@ -490,9 +583,27 @@ class Session:
         on_token: Callable[[str], None] | None,
         callback: Callable[[Response], None] | None,
     ) -> None:
+        import dataclasses
+
         from openvibe.agent.agent import resolve as _resolve
+        from openvibe.config import PermissionAction
+        from openvibe.permission.permission import Rule
 
         agent = _resolve(self._config, self._agent_name)
+
+        if self._permission_mode == "bypass":
+            # Prepend a wildcard ALLOW rule so every tool call is auto-approved.
+            agent = dataclasses.replace(
+                agent,
+                permission_rules=[Rule(tool="*", action=PermissionAction.ALLOW)]
+                + list(agent.permission_rules),
+            )
+        elif self._permission_mode == "smart":
+            from openvibe.permission.permission import SMART_MODE_RULES
+            agent = dataclasses.replace(
+                agent,
+                permission_rules=list(SMART_MODE_RULES) + list(agent.permission_rules),
+            )
 
         if self._processor is not None:
             # Async processor path — full-featured (bus events, real-time tools, etc.)
@@ -606,6 +717,8 @@ class OpenVibe:
         from openvibe.config import load_config
         from openvibe.db import create_database
         from openvibe.project import project as _project_module
+        from openvibe.skill.bundled import init_bundled_skills
+        from openvibe.skill.loader import load_skills_dir
         from openvibe.tool.base import create_default_registry
 
         if self._config is None:
@@ -615,6 +728,9 @@ class OpenVibe:
             self._db = create_database()
         self._registry = create_default_registry()
         self._project = _project_module.get_or_create(self._db, self._project_dir)
+
+        init_bundled_skills()
+        load_skills_dir(self._project_dir / "skills")
 
         if self._config.mcp:
             self._init_mcp()
@@ -648,12 +764,17 @@ class OpenVibe:
         from openvibe.permission.permission import PermissionService
         from openvibe.project import project as _project_module
         from openvibe.session.processor import SessionProcessor
+        from openvibe.skill.bundled import init_bundled_skills
+        from openvibe.skill.loader import load_skills_dir
         from openvibe.tool.base import create_default_registry
 
         if self._config is None:
             self._config = load_config(self._project_dir)
         if self._db is None:
             self._db = create_database()
+
+        init_bundled_skills()
+        load_skills_dir(self._project_dir / "skills")
 
         llm = self._llm or create_default_backend()
         self._bus = EventBus()
@@ -705,7 +826,19 @@ class OpenVibe:
         self,
         agent: str = "build",
         title: str | None = None,
+        mode: str = "default",
     ) -> Session:
+        """Create a new session.
+
+        *mode* controls how tool permission requests are handled:
+
+        * ``"default"``  — ask the user for every tool call.
+        * ``"smart"``    — pre-approve common safe operations (file reads/edits,
+                           read-only bash, running tests) so the agent can work
+                           without constant interruption.
+        * ``"bypass"``   — auto-approve everything; use only when you fully
+                           trust the task being performed.
+        """
         self._require_started()
         from openvibe.session import session as _store
 
@@ -715,7 +848,7 @@ class OpenVibe:
             directory=str(self._project_dir),
             title=title,
         )
-        return Session(
+        session = Session(
             info,
             self._db,
             self._registry,
@@ -726,6 +859,19 @@ class OpenVibe:
             bus=self._bus,
             permissions=self._permissions,
         )
+        session._permission_mode = mode
+        return session
+
+    def create_full_permission_session(
+        self,
+        agent: str = "build",
+        title: str | None = None,
+    ) -> Session:
+        """Convenience wrapper — creates a session with mode='bypass'.
+
+        Kept for backward compatibility; prefer ``create_session(mode='bypass')``.
+        """
+        return self.create_session(agent=agent, title=title or "bypass", mode="bypass")
 
     def get_session(self, session_id: str, agent: str = "build") -> Session:
         self._require_started()

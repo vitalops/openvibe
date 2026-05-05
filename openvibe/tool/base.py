@@ -56,7 +56,7 @@ from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from openvibe.llm import Message
-    from openvibe.permission.permission import PermissionService
+    from openvibe.permission.permission import PermissionService, Rule
 
 MAX_OUTPUT_CHARS = 4_000
 
@@ -80,6 +80,9 @@ class ToolContext:
     # Permission service is injected so tools can call ctx.check_permission()
     _permissions: "PermissionService | None" = field(default=None, repr=False)
     _messages: list["Message"] = field(default_factory=list, repr=False)
+    # Agent-level rules evaluated before the global DB rules.
+    # When set, DB rules are skipped so the agent's ruleset is authoritative.
+    _permission_rules: "list[Rule]" = field(default_factory=list, repr=False)
 
     async def check_permission(
         self, tool: str, argument: str | None = None, description: str = ""
@@ -89,7 +92,10 @@ class ToolContext:
             await self._permissions.check(
                 tool=tool,
                 argument=argument,
-                project_id=self.project_id,
+                # Use agent-level rules when present; this also skips the DB
+                # lookup so the agent's ruleset is the sole authority.
+                rules=self._permission_rules or None,
+                project_id=self.project_id if not self._permission_rules else None,
                 session_id=self.session_id,
                 description=description,
             )
@@ -207,7 +213,12 @@ class ToolRegistry:
 
 
 def create_default_registry() -> ToolRegistry:
-    """Create a registry pre-loaded with all built-in tools."""
+    """Create a registry pre-loaded with all built-in tools, including computer-use.
+
+    Computer-use tools (screenshot, mouse, keyboard, app, ui) are always
+    registered so users can interact with the desktop without switching agents.
+    Their dependencies are auto-installed on first use via openvibe.computer.deps.
+    """
     from openvibe.tool.bash import BashTool
     from openvibe.tool.edit import EditTool
     from openvibe.tool.glob_tool import GlobTool
@@ -218,6 +229,13 @@ def create_default_registry() -> ToolRegistry:
     from openvibe.tool.web_fetch import WebFetchTool
     from openvibe.tool.web_search import WebSearchTool
     from openvibe.tool.write import WriteTool
+    from openvibe.tool.computer_app import AppTool
+    from openvibe.tool.computer_keyboard import KeyboardTool
+    from openvibe.tool.computer_mouse import MouseTool
+    from openvibe.tool.computer_screenshot import ScreenshotTool
+    from openvibe.tool.computer_ui import UITool
+    from openvibe.tool.computer_clipboard import ClipboardTool
+    from openvibe.tool.computer_ocr import OCRTool
 
     registry = ToolRegistry()
     for tool in [
@@ -232,6 +250,18 @@ def create_default_registry() -> ToolRegistry:
         WebFetchTool(),
         TodoWriteTool(),
         TodoReadTool(),
+        ScreenshotTool(),
+        UITool(),
+        MouseTool(),
+        KeyboardTool(),
+        AppTool(),
+        ClipboardTool(),
+        OCRTool(),
     ]:
         registry.register(tool)
     return registry
+
+
+def create_computer_use_registry() -> ToolRegistry:
+    """Alias for create_default_registry — computer-use tools are now built-in."""
+    return create_default_registry()

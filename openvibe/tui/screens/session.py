@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from textual import events as textual_events
@@ -11,6 +12,7 @@ from textual.binding import Binding
 from textual.screen import Screen
 from textual.widgets import Static
 
+from openvibe.tui.clipboard import copy_to_clipboard as _copy_to_clipboard
 from openvibe.api import SessionState
 from openvibe.session.models import TextPart, ToolPart
 from openvibe.tui import events
@@ -36,6 +38,7 @@ class SessionScreen(Screen):
     BINDINGS = [
         Binding("ctrl+s", "sessions", "Sessions", show=True),
         Binding("ctrl+n", "new_session", "New", show=True),
+        Binding("ctrl+y", "copy_last", "Copy", show=True),
         Binding("escape", "cancel_turn", "Cancel", show=False),
     ]
 
@@ -221,11 +224,17 @@ class SessionScreen(Screen):
 
         # Slash commands — handled at the API level, but we intercept the
         # result here to avoid freezing the UI / showing a spinner.
-        from openvibe.commands import is_command
+        # Skill invocations (/skillname args) look like commands but go to
+        # the LLM; route them through _start_turn instead.
+        from openvibe.commands import _COMMANDS, get_command, is_command  # noqa: PLC2701
 
         if is_command(event.text):
-            await self._handle_command(event.text)
-            return
+            parsed = get_command(event.text)
+            name = parsed[0] if parsed else ""
+            if name in _COMMANDS:
+                await self._handle_command(event.text)
+                return
+            # Not a registered command — fall through to LLM path (skill).
 
         input_bar = self.query_one(InputBar)
         input_bar.record_submission(event.text)
@@ -264,9 +273,11 @@ class SessionScreen(Screen):
         widget = await msg_list.add_message(user_msg.id, "user")
         widget.append_text(text)
 
-        # Execute via the API layer.
+        # Execute via the API layer — run in a thread so blocking commands
+        # (e.g. /learn stop waiting for screenshot futures) don't freeze the TUI.
         session = self.app.get_session(self._session_id)  # type: ignore[attr-defined]
-        response = session.send(text)
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(None, session.send, text)
         result = response.command_result
 
         if result is None:
@@ -285,6 +296,7 @@ class SessionScreen(Screen):
 
         # Persist and display the result as an assistant message.
         if result.output:
+
             reply_msg = session_store.add_message(
                 db,
                 self._session_id,
@@ -295,7 +307,24 @@ class SessionScreen(Screen):
                 reply_msg.id,
                 str(MessageRole.ASSISTANT),
             )
-            result_widget.append_text(result.output)
+            result_widget.set_markup(result.output)
+
+        # Multimodal follow-up: direct LLM call with images (e.g. /learn stop).
+        # Images go straight to the API — never visible in the chat log.
+        if result.followup_content:
+            input_bar.freeze()
+            self._refresh_header(streaming=True)
+            self._start_learn_summarize(
+                result.followup_content,
+                result.followup_task_name,
+                result.followup_proc_path,
+            )
+        # Text-only follow-up: start a normal agent turn (e.g. /learn replay).
+        elif result.followup_prompt:
+            input_bar.freeze()
+            self._stream_token_count = 0
+            self._refresh_header(streaming=True)
+            self._start_turn(result.followup_prompt)
 
     # ------------------------------------------------------------------
     # Permission handling
@@ -435,6 +464,106 @@ class SessionScreen(Screen):
             self._dispatch_response(response)
         except Exception as exc:  # noqa: BLE001
             self.app.call_from_thread(self.post_message, events.StreamError(str(exc)))
+
+    @work(thread=True)
+    def _start_learn_summarize(
+        self, content: list, task_name: str, proc_path: str
+    ) -> None:
+        """Call the configured LLM directly with multimodal content, parse the
+        procedure JSON, and save it.  Images never appear in the chat log —
+        only the completion/error message is shown.
+        """
+        import json
+        import re
+
+        from openvibe.config import MessageRole
+        from openvibe.session import session as session_store
+        from openvibe.session.models import TextPart
+
+        ov = self.app.ov  # type: ignore[attr-defined]
+        db = ov._db  # type: ignore[attr-defined]
+
+        def _post_message(text: str, role: str = "assistant") -> None:
+            msg = session_store.add_message(
+                db, self._session_id,
+                MessageRole.ASSISTANT if role == "assistant" else MessageRole.ERROR,
+                [TextPart(content=text)],
+            )
+            self.app.call_from_thread(
+                self.post_message, events.NewMessage(msg.id, role)
+            )
+            self.app.call_from_thread(
+                self.post_message, events.TextDelta(msg.id, text)
+            )
+
+        try:
+            import litellm
+
+            # Resolve model string from the session config (respects user's choice)
+            cfg = ov._config
+            model_str = (
+                f"{cfg.model.provider_id}/{cfg.model.model_id}"
+                if cfg.model
+                else "openai/gpt-4o"
+            )
+
+            response = litellm.completion(
+                model=model_str,
+                messages=[{"role": "user", "content": content}],
+                timeout=120,
+            )
+            raw = response.choices[0].message.content or ""
+
+            # Extract JSON — handle optional ```json ... ``` fences
+            json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
+            if not json_match:
+                json_match = re.search(r"\{.*\}", raw, re.DOTALL)
+
+            if json_match:
+                data = json.loads(json_match.group(1) if json_match.lastindex else json_match.group())
+            else:
+                # Fallback: save raw text as the procedure
+                data = {
+                    "task_name": task_name,
+                    "description": f"Recorded task: {task_name}",
+                    "steps": [],
+                    "procedure": raw.strip(),
+                }
+
+            from pathlib import Path
+            p = Path(proc_path)
+            # Merge with existing file (which already has ax_context saved by cmd_learn_stop)
+            existing = {}
+            if p.exists():
+                try:
+                    existing = json.loads(p.read_text())
+                except Exception:
+                    pass
+            existing.update(data)
+            p.write_text(json.dumps(existing, indent=2, ensure_ascii=False))
+
+            desc = data.get("description", "")
+            steps = data.get("steps", [])
+            steps_preview = (
+                "\n".join(f"  {i+1}. {s}" for i, s in enumerate(steps[:5]))
+                + ("\n  …" if len(steps) > 5 else "")
+            ) if steps else "  (see procedure file)"
+
+            _post_message(
+                f"[green]Procedure saved:[/green] [bold]{task_name}[/bold]\n"
+                f"[dim]{desc}[/dim]\n\n"
+                f"[bold]Steps:[/bold]\n{steps_preview}\n\n"
+                f"[dim]Run [bold]/learn replay {task_name}[/bold] to execute.[/dim]"
+            )
+
+        except Exception as exc:  # noqa: BLE001
+            _post_message(
+                f"[red]Failed to generate procedure for '{task_name}':[/red] {exc}\n"
+                "[dim]Check your model config and try again.[/dim]",
+                role="error",
+            )
+
+        self.app.call_from_thread(self.post_message, events.TurnCompleted(""))
 
     @work(thread=True)
     def _start_resume_interrupted_turn(self, allow: bool) -> None:
@@ -613,3 +742,28 @@ class SessionScreen(Screen):
         session.abort()
         self.query_one(InputBar).enable()
         self._refresh_header()
+
+    def action_copy_last(self) -> None:
+        """Copy the focused message/tool widget, or last assistant message (Ctrl+Y)."""
+        from openvibe.tui.widgets.messages import MessageWidget, ToolWidget
+        from openvibe.tui.clipboard import strip_markup
+        focused = self.app.focused
+        if isinstance(focused, (MessageWidget, ToolWidget)):
+            text = focused.get_copy_text()
+        else:
+            raw = self.query_one(MessageList).get_last_assistant_text()
+            text = strip_markup(raw) if raw else ""
+        if not text:
+            return
+        input_bar = self.query_one(InputBar)
+        if _copy_to_clipboard(text):
+            input_bar.set_status("[green]Copied to clipboard.[/green]")
+        else:
+            input_bar.set_status("[dim]Clipboard unavailable (install xclip/xsel on Linux).[/dim]")
+        input_bar.focus_input()
+        self.set_timer(2.5, self._restore_hint)
+
+    def _restore_hint(self) -> None:
+        input_bar = self.query_one(InputBar)
+        if not input_bar.in_permission_mode:
+            input_bar.set_status(input_bar._hint_text())

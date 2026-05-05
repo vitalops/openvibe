@@ -164,6 +164,32 @@ def _to_litellm_messages(messages: list[Message]) -> list[dict[str, Any]]:
         if isinstance(msg.content, str):
             d: dict[str, Any] = {"role": msg.role, "content": msg.content}
         else:
+            # role="tool" with image content needs special handling so that
+            # litellm can translate it correctly for both Anthropic (which
+            # embeds tool results inside a user message with type="tool_result")
+            # and OpenAI-compatible providers.
+            if msg.role == "tool" and msg.tool_call_id:
+                # Build the inner content list that litellm accepts for a
+                # multimodal tool result (image + caption text).
+                inner: list[dict[str, Any]] = []
+                for block in msg.content:
+                    match block.type:
+                        case "image_url":
+                            inner.append(
+                                {"type": "image_url", "image_url": block.image_url}
+                            )
+                        case "text":
+                            inner.append({"type": "text", "text": block.text or ""})
+                        case _:
+                            pass
+                d = {
+                    "role": "tool",
+                    "tool_call_id": msg.tool_call_id,
+                    "content": inner,
+                }
+                out.append(d)
+                continue
+
             parts: list[dict[str, Any]] = []
             for block in msg.content:
                 match block.type:
@@ -331,6 +357,5 @@ def count_tokens(model: str, text: str) -> int:
 
 def model_context_limits(model: str) -> tuple[int, int]:
     """Return (max_input_tokens, max_output_tokens) for *model*."""
-
     info = litellm.get_model_info(model)
     return int(info["max_input_tokens"]), int(info["max_output_tokens"])

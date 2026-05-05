@@ -25,7 +25,9 @@ can trigger compaction (see ``compaction.py``).
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
+import os
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -122,13 +124,17 @@ class SessionProcessor:
         # 2. Build LLM message history
         history = session_store.list_messages(self._db, session.id)
 
-        # 3. Construct tools list for this agent
+        # 3. Auto-inject computer-use instructions when the task involves the desktop
+        if _detect_computer_use_intent(user_text):
+            agent = _with_computer_use_instructions(agent)
+
+        # 4. Construct tools list for this agent
         tool_defs = _build_tool_definitions(self._registry, agent)
 
-        # 4. Permission rules for this agent
+        # 5. Permission rules for this agent
         rules: list["Rule"] = list(agent.permission_rules)
 
-        # 5. Main loop
+        # 6. Main loop
         doom_counts: dict[str, int] = {}  # key: "tool:args_json" → count
         assistant_msg: MessageInfo | None = None
 
@@ -336,6 +342,19 @@ class SessionProcessor:
                         tool_part.state.time_end = time.monotonic() - t0
                         if result.error:
                             tool_part.state.error = result.output
+
+                        # Persist the first image attachment (e.g. screenshot)
+                        # so it can be forwarded to the LLM on the next turn.
+                        for att in result.attachments:
+                            if att.media_type.startswith("image/"):
+                                tool_part.state.metadata["image_b64"] = (
+                                    base64.b64encode(att.content).decode("ascii")
+                                )
+                                tool_part.state.metadata["image_media_type"] = (
+                                    att.media_type
+                                )
+                                break
+
                         session_store.upsert_part(
                             self._db, assistant_msg.id, part_idx, tool_part
                         )
@@ -431,7 +450,7 @@ class SessionProcessor:
                             message_id=msg.id,
                             agent_name=agent.name,
                             project_id=session.project_id,
-                            working_dir=session.directory,
+                            working_dir=os.getcwd(),
                             abort=abort,
                             call_id=part.state.call_id,
                             _permissions=None,  # user already approved; bypass check
@@ -564,10 +583,11 @@ class SessionProcessor:
             message_id=assistant_msg_id,
             agent_name=agent.name,
             project_id=session.project_id,
-            working_dir=session.directory,
+            working_dir=os.getcwd(),
             abort=abort,
             call_id=call_id,
             _permissions=self._permissions,
+            _permission_rules=list(rules),
         )
         # Inject DB reference for tools that need it (todo, etc.)
         ctx._db = self._db  # type: ignore[attr-defined]
@@ -615,6 +635,58 @@ def _build_tool_definitions(
         for t in registry.all()
         if t.name not in disabled
     ]
+
+
+_COMPUTER_USE_KEYWORDS = frozenset([
+    # screen / display
+    "screen", "screenshot", "desktop", "window", "display", "monitor",
+    # apps / GUI
+    "click", "button", "menu", "toolbar", "dialog", "popup", "modal",
+    "open app", "launch", "application", "browser", "chrome", "firefox",
+    "safari", "finder", "explorer", "vscode", "vs code",
+    # interaction
+    "type into", "fill in", "drag", "scroll", "right-click", "double-click",
+    "keyboard shortcut", "hotkey", "copy paste",
+    # GUI-specific tasks
+    "ui", "gui", "interface", "form", "dropdown", "checkbox", "tab",
+    "notification", "toast", "alert",
+])
+
+_COMPUTER_USE_ADDENDUM = """\
+COMPUTER-USE WORKFLOW (active for this request):
+
+Tool priority:
+1. ui tool (preferred — no coordinates needed)
+   • ui get_tree  → list clickable elements by name
+   • ui click <title>  → click by element name
+   • ui click_menu "File > Save"  → trigger menu items
+   • ui type <text>  → type text (handles Unicode)
+   • ui press_key <key>  → e.g. return, escape, cmd+s
+2. app tool  → open / close / focus applications
+3. screenshot  → observe screen state; always take one after opening an app
+4. mouse (last resort — only for unlabelled canvas areas)
+   • MUST provide image_width and image_height from screenshot output
+5. keyboard → raw keystroke fallback
+
+Verification: after every action take a screenshot and confirm the change.
+If "No visible change detected", do NOT repeat — reassess with ui get_tree.
+Never move the mouse to (0, 0).
+"""
+
+
+def _detect_computer_use_intent(user_text: str) -> bool:
+    """Return True if the user message likely involves desktop/GUI interaction."""
+    low = user_text.lower()
+    return any(kw in low for kw in _COMPUTER_USE_KEYWORDS)
+
+
+def _with_computer_use_instructions(agent: "AgentInfo") -> "AgentInfo":
+    """Return a copy of *agent* with the CU workflow addendum appended."""
+    import dataclasses
+    return dataclasses.replace(
+        agent,
+        extra_instructions=list(agent.extra_instructions) + [_COMPUTER_USE_ADDENDUM],
+    )
 
 
 def _build_system_prompt(agent: "AgentInfo") -> str:
@@ -670,18 +742,43 @@ def _to_llm_messages(history: list[MessageInfo], agent: "AgentInfo") -> list[Mes
                 # output is None — emit a synthetic result so the LLM message
                 # sequence remains valid (every tool_call needs a matching result).
                 for part in tool_parts:
-                    content = (
+                    output_text = (
                         part.state.output
                         if part.state.output is not None
                         else "Tool execution was interrupted (session was closed before the tool completed)."
                     )
-                    messages.append(
-                        Message(
-                            role="tool",
-                            content=content,
-                            tool_call_id=part.state.call_id,
-                        )
+                    image_b64: str | None = part.state.metadata.get("image_b64")
+                    image_media_type: str = part.state.metadata.get(
+                        "image_media_type", "image/png"
                     )
+
+                    if image_b64:
+                        # Build a vision-capable tool result: image first so the
+                        # model sees it before the caption, then the text caption.
+                        content_blocks = [
+                            ContentBlock(
+                                type="image_url",
+                                image_url={
+                                    "url": f"data:{image_media_type};base64,{image_b64}"
+                                },
+                            ),
+                            ContentBlock(type="text", text=output_text),
+                        ]
+                        messages.append(
+                            Message(
+                                role="tool",
+                                content=content_blocks,
+                                tool_call_id=part.state.call_id,
+                            )
+                        )
+                    else:
+                        messages.append(
+                            Message(
+                                role="tool",
+                                content=output_text,
+                                tool_call_id=part.state.call_id,
+                            )
+                        )
 
     return messages
 

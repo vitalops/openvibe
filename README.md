@@ -1,58 +1,289 @@
 # openvibe
 
-Python implementation of [opencode](https://opencode.ai) — an open-source AI coding agent.
+**An open-source AI coding agent for your terminal — and for embedding headlessly in your own applications.**
+
+```bash
+pip install openvibe
+vibe
+```
+
+---
+
+## Why openvibe?
+
+Most AI coding agents are black boxes: you run a CLI, it does things, you watch. openvibe is different — the terminal UI is just a thin layer on top of a clean Python library you can import directly into any application.
+
+- **Truly headless.** Use `OpenVibe` and `Session` in scripts, web servers, notebooks, or background workers. No subprocess, no server, no event loop to manage.
+- **Modular tools.** File editing, web search, desktop control — each is a discrete `Tool` you register or omit. Unused capabilities add zero overhead.
+- **Any LLM provider.** Anthropic, OpenAI, Azure, Ollama, Bedrock, Vertex — if [litellm](https://github.com/BerriAI/litellm) supports it, openvibe supports it.
+- **Computer use.** See and control your desktop — screenshot, mouse, keyboard, clipboard, OCR, and app control — with Retina scaling, Set-of-Marks overlays, and automatic change detection.
+- **Explicit permissions.** Every tool call is checked against an ordered rule list. You control exactly what the agent can do on its own.
+- **MCP support.** Connect to any [Model Context Protocol](https://modelcontextprotocol.io) server over stdio or SSE.
+
+---
 
 ## Installation
 
 ```bash
-pip install -e ".[dev]"
+pip install openvibe
+
+# Desktop control + learn & replay
+pip install "openvibe[computer]"
+pip install "openvibe[learn]"
 ```
 
-## Usage
+Requires Python 3.11+.
 
-```bash
-# Start the server (default port 4096)
-openvibe serve
+---
 
-# One-shot prompt
-openvibe run "fix the failing tests"
+## Headless API
 
-# List available models
-openvibe models
+Embed openvibe directly in your application — no CLI, no subprocess.
 
-# Session management
-openvibe session list
-openvibe session show <session-id>
+```python
+from pathlib import Path
+from openvibe import OpenVibe
+from openvibe.api import SessionState
+
+# Point at your project and create a session that auto-approves safe ops
+with OpenVibe(project_dir=Path("/path/to/project")) as ov:
+    session = ov.create_session(mode="smart")
+
+    # Stream tokens as they arrive
+    response = session.send(
+        "Find all functions that call the database directly and add "
+        "an integration test for each one.",
+        on_token=lambda t: print(t, end="", flush=True),
+    )
+
+    # The agent may ask for permission before risky actions (e.g. git push)
+    while response.state == SessionState.WAITING:
+        req = response.request
+        print(f"\n\nPermission required: {req.description}")
+        choice = input("[allow/deny]: ").strip() or "allow"
+        response = session.reply(req.id, choice)
+
+    print(f"\n\nDone. Cost: ${response.cost:.4f}")
 ```
 
-## Configuration
+**Fire and forget — no permission prompts:**
 
-Create `openvibe.json` in your project root:
+```python
+with OpenVibe(project_dir=Path(".")) as ov:
+    session = ov.create_session(mode="bypass")
+    response = session.send("Write a CHANGELOG entry for everything since the last tag.")
+    print(response.text)
+```
+
+**Embed in a FastAPI endpoint:**
+
+```python
+from fastapi import FastAPI
+from openvibe import OpenVibe
+
+app = FastAPI()
+ov = OpenVibe(project_dir=Path(".")).start()
+
+@app.post("/review")
+async def review(pr_diff: str):
+    session = ov.create_session(mode="smart")
+
+    def handle(response):
+        ...  # push to websocket, write to DB, etc.
+
+    session.send_nowait(
+        f"Review this diff and summarise security concerns:\n\n{pr_diff}",
+        callback=handle,
+    )
+    return {"status": "running"}
+```
+
+---
+
+## Permissions
+
+Every tool call is checked before it runs.
+
+| Mode | Behaviour |
+|------|-----------|
+| `default` | Ask for every tool call |
+| `smart` | Pre-approve safe ops (reads, edits, safe bash, running tests) |
+| `bypass` | Auto-approve everything |
+
+Smart mode pre-approves: all file reads, `write`, `edit`, `ls`, `cat`, `find`, `mkdir`, `cp`, `mv`, read-only git, `python`, `pip`, `npm`, and more. Still asks for `rm`, `curl`, `ssh`, `git push`, and mouse/keyboard control.
+
+Fine-tune per project in `openvibe.json`:
 
 ```json
 {
-  "model": { "provider_id": "anthropic", "model_id": "claude-sonnet-4-5" },
-  "default_agent": "build",
   "permission": [
-    { "tool": "bash", "action": "ask" },
-    { "tool": "write", "action": "ask" }
+    {"tool": "read",  "action": "allow"},
+    {"tool": "bash",  "action": "deny", "pattern": "rm *"},
+    {"tool": "bash",  "action": "ask"}
   ]
 }
 ```
 
-Set your API key:
+---
+
+## Computer Use
+
+openvibe can see and control your desktop alongside its coding tools — no special mode required.
 
 ```bash
-export ANTHROPIC_API_KEY=sk-...
+pip install "openvibe[computer]"
 ```
 
-## Architecture
+```python
+with OpenVibe() as ov:
+    session = ov.create_session(agent="computer", mode="smart")
+    session.send(
+        "Open the quarterly report in Excel, copy the revenue figure from cell B4, "
+        "and paste it into the email draft in Outlook."
+    )
+```
 
-See [`src/openvibe/`](src/openvibe/) for the source. Key modules:
+The agent follows a natural see → act → verify loop:
 
-- `db.py` — SQLite abstraction (swappable via `Database` protocol)
-- `llm.py` — LLM abstraction (litellm backend, swappable via `LLMBackend` protocol)
-- `server.py` — FastAPI HTTP + SSE server
-- `session/processor.py` — core agent execution loop
-- `tool/` — built-in tools (bash, read, write, edit, glob, grep, web_fetch, todo)
-- `mcp/client.py` — MCP server integration
+1. **`screenshot`** — capture the screen; the LLM sees the current UI state
+2. **`screenshot(marks=true)`** — overlay numbered boxes on every button and field ([Set-of-Marks](https://arxiv.org/abs/2310.11441)) so the LLM can reference elements by number instead of guessing pixel coordinates
+3. **`mouse`** — click, double-click, right-click, drag, scroll, or query cursor position
+4. **`keyboard`** — type text (full Unicode via clipboard paste), press keys, send hotkeys, or hold a key
+5. **`screenshot`** — automatic change detection reports what changed vs the previous capture, confirming the action worked
+
+Additional tools: **`app`** (open/close/focus/list applications), **`clipboard`** (read/write), **`ocr`** (extract exact text without LLM vision tokens).
+
+Retina/HiDPI scaling is handled automatically — pass `image_width` and `image_height` from the screenshot output to the mouse tool and coordinates are translated correctly.
+
+See [Computer Use docs](docs/computer-use.md) for full parameter reference, sandbox constraints, and platform notes.
+
+---
+
+## Learn & Replay
+
+Record any computer task once; replay it autonomously later.
+
+```
+/learn start "export monthly report"
+# ... do the task manually ...
+/learn stop
+```
+
+openvibe captures mouse clicks, keyboard input, screenshots, and the macOS Accessibility tree at each step. A multimodal LLM converts the recording into a reusable procedure.
+
+```
+/learn replay "export monthly report"
+/learn list
+```
+
+Replay is fully autonomous — the agent opens the required apps, navigates windows, and executes each step without asking for input.
+
+---
+
+## Custom Tools
+
+```python
+from pydantic import Field
+from openvibe.tool.base import Tool, ToolContext, ToolResult, create_default_registry
+
+class SlackTool(Tool):
+    name = "slack"
+    description = "Post a message to a Slack channel."
+
+    class Params(Tool.Params):
+        channel: str = Field(description="Channel name, e.g. #general")
+        message: str = Field(description="Message text.")
+
+    async def execute(self, ctx: ToolContext, params: "SlackTool.Params") -> ToolResult:
+        await ctx.check_permission(tool=self.name, argument=params.channel,
+                                   description=f"Post to {params.channel}")
+        # ... send message ...
+        return ToolResult(title=f"Slack → {params.channel}", output="Sent.")
+
+registry = create_default_registry()
+registry.register(SlackTool())
+
+with OpenVibe() as ov:
+    ov._registry = registry
+    session = ov.create_session()
+    session.send("Post a standup update to #general")
+```
+
+---
+
+## Configuration
+
+`openvibe.json` at project root or `~/.config/openvibe/openvibe.json` globally:
+
+```json
+{
+  "model": {
+    "provider_id": "anthropic",
+    "model_id": "claude-sonnet-4-6"
+  },
+  "provider": {
+    "anthropic": {"api_key": "${ANTHROPIC_API_KEY}"}
+  },
+  "agent": {
+    "build": {"temperature": 0.2, "max_steps": 50}
+  },
+  "instructions": [
+    "Always write tests alongside new code."
+  ]
+}
+```
+
+Switch model live: `/model anthropic/claude-opus-4-6 --global`
+
+Supported providers: Anthropic, OpenAI, Azure OpenAI, Google Gemini, Ollama, AWS Bedrock, Groq, Mistral, Together AI, Vertex AI.
+
+---
+
+## MCP
+
+```json
+{
+  "mcp": {
+    "filesystem": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
+    },
+    "remote": {
+      "type": "sse",
+      "url": "http://localhost:8080/mcp"
+    }
+  }
+}
+```
+
+MCP tools are registered automatically and available to all agents.
+
+---
+
+## Full Documentation
+
+See the [`docs/`](docs/) folder for the complete reference:
+
+| | |
+|-|-|
+| [Installation](docs/installation.md) | Requirements, extras, first run |
+| [API](docs/api.md) | Headless Python API — `OpenVibe`, `Session` |
+| [TUI](docs/tui.md) | Terminal interface, key bindings, slash commands |
+| [Tools](docs/tools.md) | All built-in tools and parameters |
+| [Computer Use](docs/computer-use.md) | Screenshot, mouse, keyboard, app, clipboard, OCR |
+| [Agents](docs/agents.md) | Built-in and custom agents |
+| [Skills](docs/skills.md) | Built-in skills, writing custom skills |
+| [Learn & Replay](docs/learn.md) | Record and replay computer tasks |
+| [Permissions](docs/permissions.md) | Modes, rules, storage |
+| [Configuration](docs/configuration.md) | `openvibe.json` schema |
+| [MCP](docs/mcp.md) | Model Context Protocol integration |
+| [Custom Tools](docs/custom-tools.md) | Writing your own tools |
+| [Providers](docs/providers.md) | Multi-provider LLM support |
+| [Architecture](docs/architecture.md) | Component map and data flow |
+
+---
+
+## License
+
+MIT

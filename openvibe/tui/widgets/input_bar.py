@@ -79,9 +79,11 @@ class ChatInput(TextArea):
         self.insert("\n")
 
     def on_blur(self) -> None:
-        """Reclaim focus unless we're disabled (e.g. permission bar is active)."""
+        """Reclaim focus unless we're disabled or focus moved to a message/tool widget."""
         if not self.disabled:
-            self.focus()
+            from openvibe.tui.widgets.messages import MessageWidget, ToolWidget
+            if not isinstance(self.app.focused, (MessageWidget, ToolWidget)):
+                self.focus()
 
     def action_history_prev(self) -> None:
         row, _ = self.cursor_location
@@ -205,7 +207,7 @@ class InputBar(Widget):
         yield ChatInput(id="chat-input")
 
     def _hint_text(self) -> str:
-        return "[dim]enter[/dim] send  [dim]ctrl+j[/dim] newline  [dim]↑↓[/dim] history  [dim]ctrl+q[/dim] exit"
+        return "[dim]enter[/dim] send  [dim]ctrl+j[/dim] newline  [dim]↑↓[/dim] history  [dim]ctrl+y[/dim] copy  [dim]ctrl+q[/dim] / [dim]:q[/dim] exit"
 
     def focus_input(self) -> None:
         self.query_one(ChatInput).focus()

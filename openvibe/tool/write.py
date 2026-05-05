@@ -23,6 +23,16 @@ class WriteTool(Tool):
 
     async def execute(self, ctx: ToolContext, params: "WriteTool.Params") -> ToolResult:
         path = _resolve(params.path, ctx.working_dir)
+        if path is None:
+            return ToolResult(
+                title=f"Write {params.path}",
+                output=(
+                    f"'{params.path}' is a bare filename with no directory component. "
+                    "Provide an absolute path so the file is written to the correct location. "
+                    "Use a screenshot or the current environment to determine the right directory."
+                ),
+                error=True,
+            )
 
         await ctx.check_permission(
             tool="write",
@@ -46,6 +56,12 @@ class WriteTool(Tool):
         )
 
 
-def _resolve(path_str: str, working_dir: str) -> Path:
+def _resolve(path_str: str, working_dir: str) -> Path | None:
     p = Path(path_str)
-    return p if p.is_absolute() else Path(working_dir) / p
+    if p.is_absolute():
+        return p
+    # Explicit project-relative: starts with ./ or ../ or has a directory component
+    if path_str.startswith(("./", "../")) or p.parent != Path("."):
+        return Path(working_dir) / p
+    # Bare filename (e.g. "output.docx") — no implicit directory; caller must provide absolute path
+    return None

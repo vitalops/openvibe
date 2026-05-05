@@ -29,6 +29,9 @@ dependencies = [
     "selenium>=4.0.0",
     "webdriver-manager>=4.0.0",
     "beautifulsoup4>=4.12.0",
+    "mss>=9.0.0",
+    "Pillow>=10.0.0",
+    "pyautogui>=0.9.54",
 ]
 
 [project.optional-dependencies]
@@ -37,6 +40,10 @@ dev = [
     "pytest-asyncio>=0.24.0",
     "ruff>=0.6.0",
     "mypy>=1.11.0",
+]
+learn = [
+    "pynput>=1.7.0",
+    "atomacos>=3.0.0",   # macOS only — accessibility tree capture for learn/replay
 ]
 
 [project.scripts]
