@@ -16,6 +16,7 @@ Most AI coding agents are black boxes: you run a CLI, it does things, you watch.
 - **Truly headless.** Use `OpenVibe` and `Session` in scripts, web servers, notebooks, or background workers. No subprocess, no server, no event loop to manage.
 - **Modular tools.** File editing, web search, desktop control — each is a discrete `Tool` you register or omit. Unused capabilities add zero overhead.
 - **Any LLM provider.** Anthropic, OpenAI, Azure, Ollama, Bedrock, Vertex — if [litellm](https://github.com/BerriAI/litellm) supports it, openvibe supports it.
+- **Computer use.** See and control your desktop — screenshot, mouse, keyboard, clipboard, OCR, and app control — with Retina scaling, Set-of-Marks overlays, and automatic change detection.
 - **Explicit permissions.** Every tool call is checked against an ordered rule list. You control exactly what the agent can do on its own.
 - **MCP support.** Connect to any [Model Context Protocol](https://modelcontextprotocol.io) server over stdio or SSE.
 
@@ -122,6 +123,39 @@ Fine-tune per project in `openvibe.json`:
   ]
 }
 ```
+
+---
+
+## Computer Use
+
+openvibe can see and control your desktop alongside its coding tools — no special mode required.
+
+```bash
+pip install "openvibe[computer]"
+```
+
+```python
+with OpenVibe() as ov:
+    session = ov.create_session(agent="computer", mode="smart")
+    session.send(
+        "Open the quarterly report in Excel, copy the revenue figure from cell B4, "
+        "and paste it into the email draft in Outlook."
+    )
+```
+
+The agent follows a natural see → act → verify loop:
+
+1. **`screenshot`** — capture the screen; the LLM sees the current UI state
+2. **`screenshot(marks=true)`** — overlay numbered boxes on every button and field ([Set-of-Marks](https://arxiv.org/abs/2310.11441)) so the LLM can reference elements by number instead of guessing pixel coordinates
+3. **`mouse`** — click, double-click, right-click, drag, scroll, or query cursor position
+4. **`keyboard`** — type text (full Unicode via clipboard paste), press keys, send hotkeys, or hold a key
+5. **`screenshot`** — automatic change detection reports what changed vs the previous capture, confirming the action worked
+
+Additional tools: **`app`** (open/close/focus/list applications), **`clipboard`** (read/write), **`ocr`** (extract exact text without LLM vision tokens).
+
+Retina/HiDPI scaling is handled automatically — pass `image_width` and `image_height` from the screenshot output to the mouse tool and coordinates are translated correctly.
+
+See [Computer Use docs](docs/computer-use.md) for full parameter reference, sandbox constraints, and platform notes.
 
 ---
 
@@ -237,6 +271,7 @@ See the [`docs/`](docs/) folder for the complete reference:
 | [API](docs/api.md) | Headless Python API — `OpenVibe`, `Session` |
 | [TUI](docs/tui.md) | Terminal interface, key bindings, slash commands |
 | [Tools](docs/tools.md) | All built-in tools and parameters |
+| [Computer Use](docs/computer-use.md) | Screenshot, mouse, keyboard, app, clipboard, OCR |
 | [Agents](docs/agents.md) | Built-in and custom agents |
 | [Skills](docs/skills.md) | Built-in skills, writing custom skills |
 | [Learn & Replay](docs/learn.md) | Record and replay computer tasks |
