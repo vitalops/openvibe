@@ -177,3 +177,32 @@ def test_tool_registered_in_openvibe(tmp_path):
 
     with OpenVibe(project_dir=tmp_path, config=Config(), tools=[ping]) as ov:
         assert ov._registry.get("ping") is ping
+
+
+def test_register_tool_mid_session(tmp_path):
+    from openvibe import OpenVibe
+    from openvibe.config import Config
+
+    @tool
+    def late_tool(x: str) -> str:
+        """Added after start."""
+        return x
+
+    with OpenVibe(project_dir=tmp_path, config=Config()) as ov:
+        assert ov._registry.get("late_tool") is None
+        ov.register_tool(late_tool)
+        assert ov._registry.get("late_tool") is late_tool
+
+
+def test_register_tool_before_start_raises(tmp_path):
+    from openvibe import OpenVibe
+    from openvibe.config import Config
+
+    @tool
+    def early(x: str) -> str:
+        """Too early."""
+        return x
+
+    ov = OpenVibe(project_dir=tmp_path, config=Config())
+    with pytest.raises(RuntimeError):
+        ov.register_tool(early)

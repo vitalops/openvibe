@@ -796,6 +796,27 @@ class OpenVibe:
     # Internal
     # ------------------------------------------------------------------
 
+    def register_tool(self, t: Any) -> None:
+        """Register a tool into the live registry.
+
+        Works mid-session — all active and future sessions share the same
+        registry object, so the tool becomes available immediately.
+
+        Example::
+
+            @tool
+            def ping(msg: str) -> str:
+                \"\"\"Ping.\"\"\"
+                return f"pong: {msg}"
+
+            with OpenVibe() as ov:
+                session = ov.create_session()
+                ov.register_tool(ping)   # available to session right away
+                session.send("use ping")
+        """
+        self._require_started()
+        self._registry.register(t)
+
     def _require_started(self) -> None:
         if self._db is None:
             raise RuntimeError(
