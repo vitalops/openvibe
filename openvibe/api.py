@@ -584,11 +584,13 @@ class OpenVibe:
         config: Any | None = None,  # openvibe.config.Config
         db: Any | None = None,  # Database — inject for testing
         llm: Any | None = None,  # sync LLM callable — inject for testing
+        tools: list[Any] | None = None,  # extra Tool instances to register
     ) -> None:
         self._project_dir = (project_dir or Path.cwd()).resolve()
         self._config = config
         self._db: Any = db  # None means create on start()
         self._llm: Any = llm  # None means use litellm
+        self._extra_tools: list[Any] = tools or []
         self._registry: Any = None
         self._project: Any = None
         self._mcp: Any = None  # McpClientManager — kept alive to prevent GC
@@ -614,6 +616,8 @@ class OpenVibe:
         if self._db is None:
             self._db = create_database()
         self._registry = create_default_registry()
+        for t in self._extra_tools:
+            self._registry.register(t)
         self._project = _project_module.get_or_create(self._db, self._project_dir)
 
         if self._config.mcp:
