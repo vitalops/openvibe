@@ -267,8 +267,7 @@ class Session:
 
     def _try_command(self, text: str) -> Response | None:
         """If *text* is a slash command, execute it and return a Response."""
-        from openvibe.commands import (CommandContext, execute, get_command,
-                                       is_command)
+        from openvibe.commands import CommandContext, execute, get_command, is_command
 
         if not is_command(text):
             return None
@@ -917,10 +916,14 @@ async def _run_turn_async(
     from openvibe.config import MessageRole, PermissionAction
     from openvibe.permission.permission import PermissionRequestedEvent
     from openvibe.session import session as _store
-    from openvibe.session.models import (MessageCreatedEvent,
-                                         ReasoningDeltaEvent, TextDeltaEvent,
-                                         TextPart, ToolStateChangedEvent,
-                                         TurnCompletedEvent)
+    from openvibe.session.models import (
+        MessageCreatedEvent,
+        ReasoningDeltaEvent,
+        TextDeltaEvent,
+        TextPart,
+        ToolStateChangedEvent,
+        TurnCompletedEvent,
+    )
 
     accumulated_text = ""
 
@@ -1138,10 +1141,13 @@ async def _run_interrupted_async(
     from openvibe.config import MessageRole, PermissionAction
     from openvibe.permission.permission import PermissionRequestedEvent
     from openvibe.session import session as _store
-    from openvibe.session.models import (MessageCreatedEvent,
-                                         ReasoningDeltaEvent, TextDeltaEvent,
-                                         ToolStateChangedEvent,
-                                         TurnCompletedEvent)
+    from openvibe.session.models import (
+        MessageCreatedEvent,
+        ReasoningDeltaEvent,
+        TextDeltaEvent,
+        ToolStateChangedEvent,
+        TurnCompletedEvent,
+    )
 
     accumulated_text = ""
     abort_async = _asyncio.Event()

@@ -2,8 +2,16 @@
 
 __version__ = "0.1.0"
 
-from openvibe.api import (ErrorInfo, InputRequest, InvalidStateError, OpenVibe,
-                          Option, Response, Session, SessionState)
+from openvibe.api import (
+    ErrorInfo,
+    InputRequest,
+    InvalidStateError,
+    OpenVibe,
+    Option,
+    Response,
+    Session,
+    SessionState,
+)
 from openvibe.tool.decorator import tool
 
 __all__ = [
