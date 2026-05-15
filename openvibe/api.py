@@ -267,8 +267,7 @@ class Session:
 
     def _try_command(self, text: str) -> Response | None:
         """If *text* is a slash command, execute it and return a Response."""
-        from openvibe.commands import (CommandContext, execute, get_command,
-                                       is_command)
+        from openvibe.commands import CommandContext, execute, get_command, is_command
 
         if not is_command(text):
             return None
@@ -584,11 +583,13 @@ class OpenVibe:
         config: Any | None = None,  # openvibe.config.Config
         db: Any | None = None,  # Database — inject for testing
         llm: Any | None = None,  # sync LLM callable — inject for testing
+        tools: list[Any] | None = None,  # extra Tool instances to register
     ) -> None:
         self._project_dir = (project_dir or Path.cwd()).resolve()
         self._config = config
         self._db: Any = db  # None means create on start()
         self._llm: Any = llm  # None means use litellm
+        self._extra_tools: list[Any] = tools or []
         self._registry: Any = None
         self._project: Any = None
         self._mcp: Any = None  # McpClientManager — kept alive to prevent GC
@@ -614,6 +615,8 @@ class OpenVibe:
         if self._db is None:
             self._db = create_database()
         self._registry = create_default_registry()
+        for t in self._extra_tools:
+            self._registry.register(t)
         self._project = _project_module.get_or_create(self._db, self._project_dir)
 
         if self._config.mcp:
@@ -792,6 +795,27 @@ class OpenVibe:
     # Internal
     # ------------------------------------------------------------------
 
+    def register_tool(self, t: Any) -> None:
+        """Register a tool into the live registry.
+
+        Works mid-session — all active and future sessions share the same
+        registry object, so the tool becomes available immediately.
+
+        Example::
+
+            @tool
+            def ping(msg: str) -> str:
+                \"\"\"Ping.\"\"\"
+                return f"pong: {msg}"
+
+            with OpenVibe() as ov:
+                session = ov.create_session()
+                ov.register_tool(ping)   # available to session right away
+                session.send("use ping")
+        """
+        self._require_started()
+        self._registry.register(t)
+
     def _require_started(self) -> None:
         if self._db is None:
             raise RuntimeError(
@@ -892,10 +916,14 @@ async def _run_turn_async(
     from openvibe.config import MessageRole, PermissionAction
     from openvibe.permission.permission import PermissionRequestedEvent
     from openvibe.session import session as _store
-    from openvibe.session.models import (MessageCreatedEvent,
-                                         ReasoningDeltaEvent, TextDeltaEvent,
-                                         TextPart, ToolStateChangedEvent,
-                                         TurnCompletedEvent)
+    from openvibe.session.models import (
+        MessageCreatedEvent,
+        ReasoningDeltaEvent,
+        TextDeltaEvent,
+        TextPart,
+        ToolStateChangedEvent,
+        TurnCompletedEvent,
+    )
 
     accumulated_text = ""
 
@@ -1113,10 +1141,13 @@ async def _run_interrupted_async(
     from openvibe.config import MessageRole, PermissionAction
     from openvibe.permission.permission import PermissionRequestedEvent
     from openvibe.session import session as _store
-    from openvibe.session.models import (MessageCreatedEvent,
-                                         ReasoningDeltaEvent, TextDeltaEvent,
-                                         ToolStateChangedEvent,
-                                         TurnCompletedEvent)
+    from openvibe.session.models import (
+        MessageCreatedEvent,
+        ReasoningDeltaEvent,
+        TextDeltaEvent,
+        ToolStateChangedEvent,
+        TurnCompletedEvent,
+    )
 
     accumulated_text = ""
     abort_async = _asyncio.Event()
