@@ -180,6 +180,20 @@ PROVIDERS: list[ProviderInfo] = [
         models=[],  # populated dynamically via list_models_from_api()
     ),
     ProviderInfo(
+        id="orcarouter",
+        name="OrcaRouter",
+        litellm_prefix="orcarouter",
+        env_key="ORCAROUTER_API_KEY",
+        # Static starter list; the gateway exposes 190+ namespaced model IDs.
+        models=[
+            _m("orcarouter", "openai/gpt-5.5", "GPT-5.5"),
+            _m("orcarouter", "anthropic/claude-opus-4.8", "Claude Opus 4.8"),
+            _m("orcarouter", "z-ai/glm-5.2", "GLM-5.2"),
+            _m("orcarouter", "deepseek/deepseek-v4-pro", "DeepSeek V4 Pro"),
+            _m("orcarouter", "google/gemini-3.1-flash-lite", "Gemini 3.1 Flash Lite"),
+        ],
+    ),
+    ProviderInfo(
         id="azure",
         name="Azure OpenAI",
         litellm_prefix="azure",
