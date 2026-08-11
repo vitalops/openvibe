@@ -283,6 +283,7 @@ _PROVIDER_ENV: dict[str, tuple[str | None, str | None, str | None]] = {
     "groq": ("GROQ_API_KEY", None, None),
     "mistral": ("MISTRAL_API_KEY", None, None),
     "openrouter": ("OPENROUTER_API_KEY", None, None),
+    "orcarouter": ("ORCAROUTER_API_KEY", None, None),
     "azure": ("AZURE_API_KEY", "AZURE_API_BASE", "AZURE_API_VERSION"),
 }
 

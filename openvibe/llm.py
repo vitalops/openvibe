@@ -35,6 +35,7 @@ and handles tool execution after ``ToolCallComplete`` is received.
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -207,6 +208,26 @@ def _to_litellm_tools(tools: list[ToolDefinition]) -> list[dict[str, Any]]:
     ]
 
 
+ORCAROUTER_BASE_URL = "https://api.orcarouter.ai/v1"
+
+
+def normalize_litellm_model(model: str) -> tuple[str, dict[str, str]]:
+    """Translate an OrcaRouter model to litellm's OpenAI-compatible routing.
+
+    litellm has no built-in ``orcarouter`` provider, so we route through the
+    ``openai`` provider with an explicit ``api_base`` (and ``api_key`` when
+    the ``ORCAROUTER_API_KEY`` env var is set). Any other model is returned
+    unchanged.
+    """
+    if not model.startswith("orcarouter/"):
+        return model, {}
+    kwargs: dict[str, str] = {"api_base": ORCAROUTER_BASE_URL}
+    key = os.environ.get("ORCAROUTER_API_KEY")
+    if key:
+        kwargs["api_key"] = key
+    return f"openai/{model.removeprefix('orcarouter/')}", kwargs
+
+
 class LiteLLMBackend:
     """LLM backend powered by ``litellm``.
 
@@ -236,7 +257,8 @@ class LiteLLMBackend:
         if system:
             ll_messages = [{"role": "system", "content": system}] + ll_messages
 
-        call_kwargs: dict[str, Any] = {"stream": True, **kwargs}
+        litellm_model, provider_kwargs = normalize_litellm_model(model)
+        call_kwargs: dict[str, Any] = {"stream": True, **provider_kwargs, **kwargs}
         if tools:
             call_kwargs["tools"] = _to_litellm_tools(tools)
         if temperature is not None:
@@ -250,7 +272,7 @@ class LiteLLMBackend:
         pending: dict[int, dict[str, Any]] = {}
 
         response = await litellm.acompletion(
-            model=model, messages=ll_messages, **call_kwargs
+            model=litellm_model, messages=ll_messages, **call_kwargs
         )
 
         async for chunk in response:
@@ -323,8 +345,9 @@ def resolve_model() -> str:
 
 def count_tokens(model: str, text: str) -> int:
     """Return the approximate token count for *text* under *model*."""
+    litellm_model, _ = normalize_litellm_model(model)
     return litellm.token_counter(
-        model=model,
+        model=litellm_model,
         messages=[{"role": "system", "content": text}],
     )
 
@@ -332,5 +355,6 @@ def count_tokens(model: str, text: str) -> int:
 def model_context_limits(model: str) -> tuple[int, int]:
     """Return (max_input_tokens, max_output_tokens) for *model*."""
 
-    info = litellm.get_model_info(model)
+    litellm_model, _ = normalize_litellm_model(model)
+    info = litellm.get_model_info(litellm_model)
     return int(info["max_input_tokens"]), int(info["max_output_tokens"])

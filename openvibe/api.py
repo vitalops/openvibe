@@ -1372,14 +1372,19 @@ def _run_turn(
 
             if llm is not None:
                 _llm_call = llm
+                litellm_model = _model_string(agent)
+                provider_kwargs: dict[str, Any] = {}
             else:
                 import litellm  # lazy — keeps startup fast and tests free
+                from openvibe.llm import normalize_litellm_model  # lazy — keeps startup fast
 
                 _llm_call = litellm.completion
+                litellm_model, provider_kwargs = normalize_litellm_model(_model_string(agent))
             stream = _llm_call(
-                model=_model_string(agent),
+                model=litellm_model,
                 messages=ll_messages,
                 **call_kwargs,
+                **provider_kwargs,
             )
 
             for chunk in stream:
